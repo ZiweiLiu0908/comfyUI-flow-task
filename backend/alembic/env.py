@@ -6,6 +6,7 @@ import sys
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+import sqlalchemy as sa
 
 # Ensure `app` package is importable when Alembic runs from backend/.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +48,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            version_table_pk_type=sa.String(256),
+        )
 
         with context.begin_transaction():
             context.run_migrations()

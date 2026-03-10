@@ -9,6 +9,7 @@ Create Date: 2026-02-09 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "0001_init"
@@ -18,11 +19,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    task_status = sa.Enum("pending", "running", "success", "fail", name="task_status")
-    photo_source_type = sa.Enum("img_url", "upload", "paste", name="photo_source_type")
+    sa.Enum("pending", "running", "success", "fail", name="task_status").create(op.get_bind(), checkfirst=True)
+    sa.Enum("img_url", "upload", "paste", name="photo_source_type").create(op.get_bind(), checkfirst=True)
 
-    task_status.create(op.get_bind(), checkfirst=True)
-    photo_source_type.create(op.get_bind(), checkfirst=True)
+    task_status = postgresql.ENUM("pending", "running", "success", "fail", name="task_status", create_type=False)
+    photo_source_type = postgresql.ENUM("img_url", "upload", "paste", name="photo_source_type", create_type=False)
 
     op.create_table(
         "tasks",
@@ -80,6 +81,8 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
+
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE varchar(256)")
 
 
 def downgrade() -> None:

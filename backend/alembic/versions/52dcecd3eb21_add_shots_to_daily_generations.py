@@ -18,8 +18,6 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    bind.execute(sa.text("DROP TABLE IF EXISTS pipeline_settings"))
-    bind.execute(sa.text("DROP TABLE IF EXISTS system_settings"))
     bind.execute(sa.text("DROP INDEX IF EXISTS ix_subtask_generated_videos_subtask_id"))
     bind.execute(sa.text("DROP TABLE IF EXISTS subtask_generated_videos"))
     op.add_column('daily_generations', sa.Column('shots', sa.JSON(), nullable=True))

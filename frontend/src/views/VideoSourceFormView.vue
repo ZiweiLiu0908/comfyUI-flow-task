@@ -13,7 +13,7 @@
         </div>
         <div>
           <div class="vsf-title">添加视频</div>
-          <div class="vsf-subtitle">粘贴 TikTok 或 YouTube 链接，解析后确认保存入库</div>
+          <div class="vsf-subtitle">粘贴 TikTok、YouTube 或 Instagram 链接，解析后确认保存入库</div>
         </div>
       </div>
 
@@ -21,7 +21,7 @@
       <div class="vsf-url-row">
         <el-input
           v-model="url"
-          placeholder="https://www.tiktok.com/@user/video/... 或 YouTube 链接"
+          placeholder="https://www.tiktok.com/@user/video/... 或 YouTube / Instagram 链接"
           size="large"
           clearable
           :disabled="parsing"
@@ -143,6 +143,69 @@
                   <span class="vsf-meta-val vsf-url-val" :title="parsed.source_url">{{ parsed.source_url }}</span>
                 </div>
               </div>
+
+              <!-- ── Extra fields ── -->
+              <el-divider style="margin:16px 0 12px" />
+
+              <!-- Tags -->
+              <div class="vsf-extra-row">
+                <span class="vsf-extra-label">标签</span>
+                <div class="vsf-tag-area">
+                  <!-- Selected tags -->
+                  <span
+                    v-for="tag in selectedTags"
+                    :key="tag.id"
+                    class="vsf-tag-chip"
+                    :style="tag.color ? { background: tag.color + '22', borderColor: tag.color, color: tag.color } : {}"
+                  >
+                    {{ tag.name }}
+                    <button class="vsf-tag-remove" @click="removeTag(tag.id)">×</button>
+                  </span>
+
+                  <!-- Input to add/create tags -->
+                  <div class="vsf-tag-input-wrap">
+                    <input
+                      v-model="newTagName"
+                      class="vsf-tag-input"
+                      placeholder="+ 添加标签"
+                      @keydown.enter.prevent="addOrCreateTag"
+                      @focus="showTagDropdown = true"
+                      @blur="onTagInputBlur"
+                    />
+                    <div v-if="showTagDropdown && filteredTags.length > 0" class="vsf-tag-dropdown">
+                      <div
+                        v-for="tag in filteredTags"
+                        :key="tag.id"
+                        class="vsf-tag-option"
+                        @mousedown.prevent="selectTag(tag)"
+                      >
+                        <span class="vsf-tag-dot" :style="tag.color ? { background: tag.color } : {}" />
+                        {{ tag.name }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Create hint -->
+                  <span v-if="newTagName && !filteredTagExists" class="vsf-tag-hint">
+                    按 Enter 新建「{{ newTagName }}」
+                  </span>
+                </div>
+              </div>
+
+              <!-- Repeatable -->
+              <div class="vsf-extra-row" style="margin-top:10px">
+                <span class="vsf-extra-label">可重复</span>
+                <div class="vsf-repeat-toggle">
+                  <button
+                    class="vsf-toggle-btn"
+                    :class="{ active: repeatable }"
+                    @click="repeatable = !repeatable"
+                  >
+                    <span class="vsf-toggle-knob" />
+                  </button>
+                  <span class="vsf-toggle-text">{{ repeatable ? '是，可重复发送' : '否，仅发送一次' }}</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -164,7 +227,6 @@
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/></svg>
             <div class="vsf-success-title">保存成功！</div>
             <div class="vsf-success-sub">视频已添加到视频库</div>
-            <!-- Download hint -->
             <div class="vsf-dl-hint">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               CDN 链接可能无法直接播放，可在视频库中点击「下载上传」将视频上传到永久存储后播放
@@ -181,10 +243,11 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { parseVideoUrl, createVideoSource, downloadVideoSource } from '../api/video_sources'
+import { fetchTags, createTag } from '../api/tags'
 import { isDuplicateRequestError } from '../api/http'
 
 const router = useRouter()
@@ -196,7 +259,61 @@ const parsed = ref(null)
 const saved = ref(false)
 const parseError = ref('')
 
-const PLATFORM_LABELS = { youtube: 'YouTube', tiktok: 'TikTok' }
+// Tag state
+const allTags = ref([])
+const selectedTagIds = ref([])
+const newTagName = ref('')
+const showTagDropdown = ref(false)
+
+// Repeatable state
+const repeatable = ref(false)
+
+const selectedTags = computed(() => allTags.value.filter(t => selectedTagIds.value.includes(t.id)))
+const filteredTags = computed(() =>
+  allTags.value.filter(t =>
+    !selectedTagIds.value.includes(t.id) &&
+    (!newTagName.value || t.name.toLowerCase().includes(newTagName.value.toLowerCase()))
+  )
+)
+const filteredTagExists = computed(() =>
+  allTags.value.some(t => t.name.toLowerCase() === newTagName.value.toLowerCase())
+)
+
+onMounted(async () => {
+  try { allTags.value = await fetchTags() } catch { /* ignore */ }
+})
+
+function selectTag(tag) {
+  if (!selectedTagIds.value.includes(tag.id)) {
+    selectedTagIds.value = [...selectedTagIds.value, tag.id]
+  }
+  newTagName.value = ''
+  showTagDropdown.value = false
+}
+
+function removeTag(id) {
+  selectedTagIds.value = selectedTagIds.value.filter(tid => tid !== id)
+}
+
+async function addOrCreateTag() {
+  const name = newTagName.value.trim()
+  if (!name) return
+  const existing = allTags.value.find(t => t.name.toLowerCase() === name.toLowerCase())
+  if (existing) { selectTag(existing); return }
+  try {
+    const tag = await createTag({ name })
+    allTags.value = [...allTags.value, tag]
+    selectTag(tag)
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '创建标签失败')
+  }
+}
+
+function onTagInputBlur() {
+  setTimeout(() => { showTagDropdown.value = false }, 150)
+}
+
+const PLATFORM_LABELS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram' }
 function platformLabel(p) { return PLATFORM_LABELS[p] || (p || '未知平台') }
 
 function formatCount(n) {
@@ -213,9 +330,9 @@ function formatDate(iso) {
 
 function formatDuration(seconds) {
   if (!seconds) return '-'
-  const minutes = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return `${minutes}:${secs.toString().padStart(2, '0')}`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 async function handleParse() {
@@ -226,12 +343,9 @@ async function handleParse() {
   parsed.value = null
   try {
     const result = await parseVideoUrl(trimmed)
-    // Dedup check: if existing_id returned, redirect to detail page
     if (result.existing_id) {
       ElMessage.warning('该视频已存在于库中，跳转到详情页')
-      setTimeout(() => {
-        router.push(`/dashboard/video-library/${result.existing_id}`)
-      }, 1000)
+      setTimeout(() => router.push(`/dashboard/video-library/${result.existing_id}`), 1000)
       return
     }
     parsed.value = result
@@ -266,27 +380,18 @@ async function handleSave() {
       height: parsed.value.height,
       aspect_ratio: parsed.value.aspect_ratio,
       extra: parsed.value.extra,
+      tag_ids: selectedTagIds.value,
+      repeatable: repeatable.value,
     })
 
-    // Check if video was just created or already existed
-    // by comparing created_at time with current time
     const isExisting = result.created_at && (new Date() - new Date(result.created_at)) > 2000
-
     if (isExisting) {
       ElMessage.warning('该视频已存在于库中，跳转到详情页')
     } else {
       ElMessage.success('保存成功，正在跳转...')
-      // Auto-trigger download in background for new videos
-      try {
-        await downloadVideoSource(result.id)
-      } catch { /* ignore download error, will show on detail page */ }
-
+      try { await downloadVideoSource(result.id) } catch { /* ignore */ }
     }
-
-    // Redirect to detail page
-    setTimeout(() => {
-      router.push(`/dashboard/video-library/${result.id}`)
-    }, 500)
+    setTimeout(() => router.push(`/dashboard/video-library/${result.id}`), 500)
   } catch (err) {
     if (isDuplicateRequestError(err)) return
     ElMessage.error(err?.response?.data?.detail || '保存失败')
@@ -299,13 +404,14 @@ function reset() {
   parsed.value = null
   parseError.value = ''
   url.value = ''
+  selectedTagIds.value = []
+  repeatable.value = false
+  newTagName.value = ''
 }
 
 function addAnother() {
   saved.value = false
-  parsed.value = null
-  parseError.value = ''
-  url.value = ''
+  reset()
 }
 </script>
 
@@ -361,22 +467,10 @@ function addAnother() {
   color: #0f172a;
   letter-spacing: -0.02em;
 }
+.vsf-subtitle { font-size: 13px; color: #64748b; margin-top: 3px; }
 
-.vsf-subtitle {
-  font-size: 13px;
-  color: #64748b;
-  margin-top: 3px;
-}
-
-.vsf-url-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.vsf-url-input {
-  flex: 1;
-}
+.vsf-url-row { display: flex; gap: 12px; margin-bottom: 16px; }
+.vsf-url-input { flex: 1; }
 
 .vsf-parse-btn {
   flex-shrink: 0;
@@ -387,21 +481,11 @@ function addAnother() {
   border: none;
 }
 
-.vsf-error {
-  margin-bottom: 16px;
-  border-radius: 10px;
-}
+.vsf-error { margin-bottom: 16px; border-radius: 10px; }
 
-/* Preview */
-.vsf-preview {
-  margin-top: 8px;
-}
+.vsf-preview { margin-top: 8px; }
 
-.divider-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-}
+.divider-text { font-size: 13px; font-weight: 600; color: #475569; }
 
 .vsf-preview-body {
   display: grid;
@@ -409,16 +493,9 @@ function addAnother() {
   gap: 28px;
   margin-top: 8px;
 }
+@media (max-width: 640px) { .vsf-preview-body { grid-template-columns: 1fr; } }
 
-@media (max-width: 640px) {
-  .vsf-preview-body { grid-template-columns: 1fr; }
-}
-
-.vsf-player-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+.vsf-player-col { display: flex; flex-direction: column; gap: 10px; }
 
 .vsf-player-wrap {
   border-radius: 12px;
@@ -430,30 +507,15 @@ function addAnother() {
   justify-content: center;
 }
 
-.vsf-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
+.vsf-video { width: 100%; height: 100%; object-fit: contain; display: block; }
 
-.vsf-thumb-only {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.vsf-thumb-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
+.vsf-thumb-only { position: relative; width: 100%; height: 100%; }
+.vsf-thumb-img { width: 100%; height: 100%; object-fit: cover; }
 
 .vsf-noplay-hint {
   position: absolute;
   bottom: 8px;
-  left: 0;
-  right: 0;
+  left: 0; right: 0;
   text-align: center;
   font-size: 12px;
   color: rgba(255,255,255,.7);
@@ -470,22 +532,10 @@ function addAnother() {
   min-height: 160px;
 }
 
-.vsf-orig-link {
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-}
+.vsf-orig-link { font-size: 12px; display: inline-flex; align-items: center; }
 
-/* Meta */
-.vsf-meta-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.vsf-meta-platform {
-  margin-bottom: 4px;
-}
+.vsf-meta-col { display: flex; flex-direction: column; gap: 12px; }
+.vsf-meta-platform { margin-bottom: 4px; }
 
 .vsf-meta-title {
   font-size: 18px;
@@ -498,23 +548,13 @@ function addAnother() {
   font-size: 13px;
   color: #64748b;
   line-height: 1.5;
-  margin-top: 8px;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.vsf-meta-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
-}
+.vsf-meta-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
 
-.vsf-meta-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
+.vsf-meta-row { display: flex; gap: 12px; align-items: flex-start; }
 
 .vsf-meta-label {
   font-size: 12px;
@@ -526,17 +566,146 @@ function addAnother() {
   padding-top: 1px;
 }
 
-.vsf-meta-val {
-  font-size: 14px;
-  color: #334155;
-  word-break: break-all;
+.vsf-meta-val { font-size: 14px; color: #334155; word-break: break-all; }
+.vsf-url-val { font-size: 12px; color: #94a3b8; word-break: break-all; }
+
+/* Extra fields */
+.vsf-extra-row { display: flex; gap: 12px; align-items: flex-start; }
+
+.vsf-extra-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  min-width: 56px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding-top: 6px;
+  flex-shrink: 0;
 }
 
-.vsf-url-val {
-  font-size: 12px;
-  color: #94a3b8;
-  word-break: break-all;
+/* Tag area */
+.vsf-tag-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
 }
+
+.vsf-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+}
+
+.vsf-tag-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: inherit;
+  opacity: 0.6;
+  padding: 0;
+  line-height: 1;
+  margin-left: 2px;
+}
+.vsf-tag-remove:hover { opacity: 1; }
+
+.vsf-tag-input-wrap { position: relative; }
+
+.vsf-tag-input {
+  border: 1px dashed #cbd5e1;
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-size: 12px;
+  outline: none;
+  width: 110px;
+  color: #334155;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+.vsf-tag-input::placeholder { color: #94a3b8; }
+.vsf-tag-input:focus { border-color: #6366f1; border-style: solid; }
+
+.vsf-tag-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.1);
+  z-index: 100;
+  min-width: 140px;
+  overflow: hidden;
+}
+
+.vsf-tag-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #334155;
+}
+.vsf-tag-option:hover { background: #f8fafc; }
+
+.vsf-tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6366f1;
+  flex-shrink: 0;
+}
+
+.vsf-tag-hint {
+  font-size: 11px;
+  color: #6366f1;
+  padding: 3px 8px;
+  background: #eef2ff;
+  border-radius: 6px;
+}
+
+/* Repeatable toggle */
+.vsf-repeat-toggle { display: flex; align-items: center; gap: 10px; padding-top: 2px; }
+
+.vsf-toggle-btn {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  background: #e2e8f0;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.vsf-toggle-btn.active { background: #6366f1; }
+
+.vsf-toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  display: block;
+}
+.vsf-toggle-btn.active .vsf-toggle-knob { transform: translateX(18px); }
+
+.vsf-toggle-text { font-size: 13px; color: #475569; }
 
 /* Actions */
 .vsf-actions {
@@ -548,9 +717,7 @@ function addAnother() {
 }
 
 /* Success */
-.vsf-success {
-  margin-top: 24px;
-}
+.vsf-success { margin-top: 24px; }
 
 .vsf-success-inner {
   text-align: center;
@@ -560,24 +727,9 @@ function addAnother() {
   background: #f0fdf4;
 }
 
-.vsf-success-title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #065f46;
-  margin: 12px 0 4px;
-}
-
-.vsf-success-sub {
-  font-size: 14px;
-  color: #059669;
-  margin-bottom: 20px;
-}
-
-.vsf-success-btns {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-}
+.vsf-success-title { font-size: 20px; font-weight: 700; color: #065f46; margin: 12px 0 4px; }
+.vsf-success-sub { font-size: 14px; color: #059669; margin-bottom: 20px; }
+.vsf-success-btns { display: flex; gap: 12px; justify-content: center; }
 
 .vsf-dl-hint {
   display: inline-flex;
@@ -595,14 +747,8 @@ function addAnother() {
   line-height: 1.5;
 }
 
-/* Transition */
-.slide-up-enter-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.slide-up-enter-from {
-  opacity: 0;
-  transform: translateY(16px);
-}
+.slide-up-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.slide-up-enter-from { opacity: 0; transform: translateY(16px); }
 
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }

@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, JSON, String, Text, Uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, Integer, JSON, String, Text, Uuid
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -38,7 +38,14 @@ class VideoSource(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="Video height in pixels")
     aspect_ratio: Mapped[float | None] = mapped_column(Float, nullable=True, comment="Video aspect ratio (width/height)")
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    repeatable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    tags: Mapped[list["Tag"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        "Tag",
+        secondary="video_source_tags",
+        lazy="selectin",
     )

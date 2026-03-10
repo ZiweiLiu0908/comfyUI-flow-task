@@ -34,7 +34,7 @@ def upgrade() -> None:
                 UPDATE tasks
                 SET execution_state = (extra -> 'execution_state')::text
                 WHERE execution_state IS NULL
-                  AND extra ? 'execution_state'
+                  AND extra::jsonb ? 'execution_state'
                 """
             )
         )
@@ -42,8 +42,8 @@ def upgrade() -> None:
             sa.text(
                 """
                 UPDATE tasks
-                SET extra = extra - 'execution_state'
-                WHERE extra ? 'execution_state'
+                SET extra = (extra::jsonb - 'execution_state')::json
+                WHERE extra::jsonb ? 'execution_state'
                 """
             )
         )

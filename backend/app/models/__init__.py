@@ -19,6 +19,7 @@ from app.models.generated_video import SubTaskGeneratedVideo
 from app.models.video_task import VideoTask, VideoSubTask
 from app.models.video_task_config import VideoTaskConfig
 from app.models.video_publication import VideoPublication
+from app.models.tag import Tag
 
 __all__ = [
     "Task", "SubTask", "SubTaskPhoto", "SubTaskGeneratedImage", "TaskTemplate",
@@ -27,4 +28,5 @@ __all__ = [
     "VideoTask", "VideoSubTask",
     "VideoTaskConfig",
     "VideoPublication",
+    "Tag",
 ]

@@ -33,8 +33,6 @@ def upgrade() -> None:
     bind.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_daily_generations_target_date ON daily_generations (target_date)"))
 
     # Drop tables that may or may not exist depending on the DB state
-    bind.execute(sa.text("DROP TABLE IF EXISTS system_settings"))
-    bind.execute(sa.text("DROP TABLE IF EXISTS pipeline_settings"))
     bind.execute(sa.text("DROP INDEX IF EXISTS ix_subtask_generated_videos_subtask_id"))
     bind.execute(sa.text("DROP TABLE IF EXISTS subtask_generated_videos"))
     op.add_column('daily_generations', sa.Column('owner_id', sa.Uuid(), nullable=False))

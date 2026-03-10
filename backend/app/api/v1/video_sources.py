@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.models.user import User
 from app.schemas.video_source import (
+    TagRead,
     VideoSourceCreate,
     VideoSourceListItem,
     VideoSourceListResponse,
@@ -85,10 +86,15 @@ async def create_video_source_endpoint(
 async def list_video_sources_endpoint(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    platform: str | None = Query(None),
+    blogger_name: str | None = Query(None),
     owner_id: uuid.UUID | None = Depends(_get_owner_id),
     session: AsyncSession = Depends(get_db),
 ) -> VideoSourceListResponse:
-    rows, total = await list_video_sources(session, page=page, page_size=page_size, owner_id=owner_id)
+    rows, total = await list_video_sources(
+        session, page=page, page_size=page_size, owner_id=owner_id,
+        platform=platform, blogger_name=blogger_name,
+    )
 
     # 批量查询创建者用户名
     owner_ids = list({r.owner_id for r in rows if r.owner_id is not None})
@@ -100,8 +106,9 @@ async def list_video_sources_endpoint(
 
     items = [
         VideoSourceListItem(
-            **{k: getattr(r, k) for k in VideoSourceListItem.model_fields if k not in ("owner_username",) and hasattr(r, k)},
+            **{k: getattr(r, k) for k in VideoSourceListItem.model_fields if k not in ("owner_username", "tags") and hasattr(r, k)},
             owner_username=username_map.get(r.owner_id) if r.owner_id else None,
+            tags=[TagRead.model_validate(t) for t in (r.tags or [])],
         )
         for r in rows
     ]

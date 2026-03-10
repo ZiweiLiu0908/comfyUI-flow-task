@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.models.tag import Tag, video_source_tags
 from app.models.video_source import VideoSource
 from app.models.video_source_stat import VideoSourceStat
 from app.schemas.video_source import VideoSourceCreate, VideoSourceParseResult
@@ -46,6 +47,8 @@ def _parse_yt_dlp_info(info: dict) -> dict:
         platform = "youtube"
     elif "tiktok" in platform:
         platform = "tiktok"
+    elif "instagram" in platform:
+        platform = "instagram"
     else:
         platform = platform or None
 
@@ -198,6 +201,7 @@ async def create_video_source(
             height=payload.height,
             aspect_ratio=payload.aspect_ratio,
             extra=payload.extra,
+            repeatable=payload.repeatable,
         )
     else:
         result = await parse_video_url(payload.source_url, session=session, owner_id=owner_id)
@@ -221,15 +225,29 @@ async def create_video_source(
             height=result.height,
             aspect_ratio=result.aspect_ratio,
             extra=result.extra,
+            repeatable=payload.repeatable,
         )
 
     session.add(vs)
+    await session.flush()  # flush to get vs.id before associating tags
+
+    # Associate tags via direct INSERT into junction table (avoids async lazy-load issue)
+    if payload.tag_ids:
+        for tag_id in payload.tag_ids:
+            await session.execute(
+                video_source_tags.insert().values(
+                    video_source_id=vs.id,
+                    tag_id=tag_id,
+                )
+            )
+
     await session.commit()
     await session.refresh(vs)
 
     logger.info(
-        "Created video source: id=%s, duration=%s, width=%s, height=%s, aspect_ratio=%s",
-        vs.id, vs.duration, vs.width, vs.height, vs.aspect_ratio
+        "Created video source: id=%s, duration=%s, width=%s, height=%s, aspect_ratio=%s, tags=%s",
+        vs.id, vs.duration, vs.width, vs.height, vs.aspect_ratio,
+        [str(t.id) for t in vs.tags],
     )
 
     return vs
@@ -241,12 +259,20 @@ async def list_video_sources(
     page: int,
     page_size: int,
     owner_id: UUID | None = None,
+    platform: str | None = None,
+    blogger_name: str | None = None,
 ) -> tuple[list[VideoSource], int]:
     stmt = select(VideoSource).order_by(VideoSource.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
     total_stmt = select(func.count(VideoSource.id))
     if owner_id is not None:
         stmt = stmt.where(VideoSource.owner_id == owner_id)
         total_stmt = total_stmt.where(VideoSource.owner_id == owner_id)
+    if platform:
+        stmt = stmt.where(VideoSource.platform == platform)
+        total_stmt = total_stmt.where(VideoSource.platform == platform)
+    if blogger_name:
+        stmt = stmt.where(VideoSource.blogger_name.ilike(f"%{blogger_name}%"))
+        total_stmt = total_stmt.where(VideoSource.blogger_name.ilike(f"%{blogger_name}%"))
     rows = (await session.execute(stmt)).scalars().all()
     total = int(await session.scalar(total_stmt) or 0)
     return list(rows), total

@@ -6,6 +6,25 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+# ── Tag schemas ──────────────────────────────────────────────────────────────
+
+class TagCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    color: str | None = None  # e.g. "#6366f1"
+
+
+class TagRead(BaseModel):
+    id: uuid.UUID
+    owner_id: uuid.UUID | None
+    name: str
+    color: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── VideoSource schemas ──────────────────────────────────────────────────────
+
 class VideoSourceParseRequest(BaseModel):
     source_url: str = Field(min_length=1)
 
@@ -56,6 +75,9 @@ class VideoSourceCreate(BaseModel):
     height: int | None = None
     aspect_ratio: float | None = None
     extra: dict | None = None
+    # New fields
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    repeatable: bool = False
 
 
 class VideoSourceRead(BaseModel):
@@ -81,6 +103,8 @@ class VideoSourceRead(BaseModel):
     height: int | None
     aspect_ratio: float | None
     extra: dict | None
+    repeatable: bool
+    tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
 
@@ -110,6 +134,8 @@ class VideoSourceListItem(BaseModel):
     width: int | None
     height: int | None
     aspect_ratio: float | None
+    repeatable: bool = False
+    tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
 

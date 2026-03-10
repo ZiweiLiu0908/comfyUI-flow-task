@@ -57,6 +57,37 @@
       </div>
     </div>
 
+    <!-- ── Filter bar ── -->
+    <div class="vl-filterbar">
+      <!-- Platform tabs -->
+      <div class="vl-platform-tabs">
+        <button
+          v-for="tab in PLATFORM_TABS"
+          :key="tab.value"
+          class="vl-tab"
+          :class="{ active: platform === tab.value }"
+          @click="switchPlatform(tab.value)"
+        >
+          <span v-if="tab.value === 'youtube'" class="tab-icon-yt">▶</span>
+          <span v-else-if="tab.value === 'tiktok'" class="tab-icon-tt">♪</span>
+          <span v-else-if="tab.value === 'instagram'" class="tab-icon-ins">◈</span>
+          {{ tab.label }}
+        </button>
+      </div>
+
+      <!-- Blogger search -->
+      <div class="vl-search-wrap">
+        <svg class="vl-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          v-model="bloggerSearch"
+          class="vl-search-input"
+          placeholder="搜索博主..."
+          @input="onSearchInput"
+        />
+        <button v-if="bloggerSearch" class="vl-search-clear" @click="clearSearch">✕</button>
+      </div>
+    </div>
+
     <!-- ── Card grid ── -->
     <div v-loading="loading" class="vl-grid">
       <div v-for="item in items" :key="item.id" class="vc" @click="goToDetail(item)">
@@ -86,6 +117,17 @@
           <div class="vc-blogger">
             <span class="vc-at">@{{ item.blogger_name || '未知博主' }}</span>
             <span v-if="item.view_count != null" class="vc-views">· {{ formatCount(item.view_count) }} 次播放</span>
+          </div>
+
+          <!-- Tags + repeatable row -->
+          <div v-if="item.tags?.length || item.repeatable" class="vc-tag-row">
+            <span
+              v-for="tag in item.tags"
+              :key="tag.id"
+              class="vc-tag"
+              :style="tag.color ? { background: tag.color + '22', borderColor: tag.color, color: tag.color } : {}"
+            >{{ tag.name }}</span>
+            <span v-if="item.repeatable" class="vc-repeat-badge">可重复</span>
           </div>
 
           <!-- Download status bar -->
@@ -128,11 +170,10 @@
           </div>
         </div>
       </div>
-
     </div>
 
     <!-- ── Empty ── -->
-    <el-empty v-if="!loading && items.length === 0" description="视频库为空，点击「添加视频」开始" :image-size="80" />
+    <el-empty v-if="!loading && items.length === 0" description="暂无视频，尝试更换筛选条件或点击「添加视频」" :image-size="80" />
 
     <!-- ── Footer ── -->
     <div v-if="total > 0" class="vl-footer">
@@ -148,7 +189,26 @@
       </div>
       <div class="vl-pagination">
         <button class="pg-btn" :disabled="page <= 1" @click="goPage(page - 1)">← 上一页</button>
+        <!-- Page number buttons -->
+        <template v-for="p in visiblePages" :key="p">
+          <span v-if="p === '...'" class="pg-ellipsis">…</span>
+          <button v-else class="pg-btn pg-num" :class="{ active: p === page }" @click="goPage(p)">{{ p }}</button>
+        </template>
         <button class="pg-btn" :disabled="endIdx >= total" @click="goPage(page + 1)">下一页 →</button>
+        <!-- Jump to page -->
+        <span class="pg-jump-wrap">
+          跳至
+          <input
+            v-model.number="jumpPage"
+            class="pg-jump-input"
+            type="number"
+            :min="1"
+            :max="totalPages"
+            @keyup.enter="doJump"
+          />
+          页
+          <button class="pg-btn pg-jump-go" @click="doJump">GO</button>
+        </span>
       </div>
     </div>
   </div>
@@ -186,7 +246,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchVideoSources, fetchVideoSourceStats, deleteVideoSource, downloadVideoSource, downloadAllVideosZip } from '../api/video_sources'
 import { batchCreateAndStartTemplates, createVideoAITemplate, startVideoAITemplate, fetchTemplatesByVideoSourceIds } from '../api/video_ai_templates'
@@ -194,8 +254,15 @@ import { isDuplicateRequestError } from '../api/http'
 import { useAuth, getToken } from '../composables/useAuth'
 
 const { isAdmin } = useAuth()
-
 const router = useRouter()
+const route = useRoute()
+
+const PLATFORM_TABS = [
+  { label: '全部', value: '' },
+  { label: 'TikTok', value: 'tiktok' },
+  { label: 'YouTube', value: 'youtube' },
+  { label: 'Instagram', value: 'instagram' },
+]
 
 const loading = ref(false)
 const deleting = ref(null)
@@ -203,31 +270,50 @@ const downloading = ref(null)
 const creatingTemplate = ref(null)
 const items = ref([])
 const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
 const stats = ref({ total: 0, youtube_count: 0, tiktok_count: 0, recent_count: 0 })
-// Map<videoSourceId, templateId> - 已有模板的视频
 const templateMap = ref({})
 const playerVisible = ref(false)
 const playerItem = ref(null)
 const downloadingAll = ref(false)
 const batchCreatingTemplate = ref(false)
 let pollTimer = null
+let searchTimer = null
 
+// State synced with URL query
+const page = ref(Number(route.query.page) || 1)
+const pageSize = ref(Number(route.query.page_size) || 20)
+const platform = ref(route.query.platform || '')
+const bloggerSearch = ref(route.query.blogger || '')
+const jumpPage = ref(page.value)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const startIdx = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize.value + 1)
 const endIdx = computed(() => Math.min(page.value * pageSize.value, total.value))
+
+// Generate visible page numbers with ellipsis
+const visiblePages = computed(() => {
+  const n = totalPages.value
+  const cur = page.value
+  if (n <= 7) return Array.from({ length: n }, (_, i) => i + 1)
+  const pages = []
+  pages.push(1)
+  if (cur > 3) pages.push('...')
+  for (let p = Math.max(2, cur - 1); p <= Math.min(n - 1, cur + 1); p++) pages.push(p)
+  if (cur < n - 2) pages.push('...')
+  pages.push(n)
+  return pages
+})
 
 const PLATFORM_COLORS = {
   youtube: 'linear-gradient(135deg, #ff0000 0%, #cc0000 100%)',
   tiktok: 'linear-gradient(135deg, #010101 0%, #69c9d0 100%)',
+  instagram: 'linear-gradient(135deg, #833ab4 0%, #fd1d1d 50%, #fcb045 100%)',
 }
-const PLATFORM_EMOJIS = { youtube: '▶', tiktok: '♪' }
-const PLATFORM_SHORTS = { youtube: 'YouTube', tiktok: 'TikTok' }
+const PLATFORM_EMOJIS = { youtube: '▶', tiktok: '♪', instagram: '◈' }
+const PLATFORM_SHORTS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram' }
 const DEFAULT_GRAD = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
 
-function thumbGradient(platform) {
-  return { background: PLATFORM_COLORS[platform] || DEFAULT_GRAD }
-}
+function thumbGradient(p) { return { background: PLATFORM_COLORS[p] || DEFAULT_GRAD } }
 function platformEmoji(p) { return PLATFORM_EMOJIS[p] || '🎬' }
 function platformShort(p) { return PLATFORM_SHORTS[p] || (p || '其他') }
 
@@ -243,6 +329,15 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+function syncUrl() {
+  const query = {}
+  if (page.value > 1) query.page = String(page.value)
+  if (pageSize.value !== 20) query.page_size = String(pageSize.value)
+  if (platform.value) query.platform = platform.value
+  if (bloggerSearch.value) query.blogger = bloggerSearch.value
+  router.replace({ query })
+}
+
 async function loadStats() {
   try {
     stats.value = await fetchVideoSourceStats()
@@ -252,11 +347,17 @@ async function loadStats() {
 async function loadData(silent = false) {
   if (!silent) loading.value = true
   try {
-    const data = await fetchVideoSources({ page: page.value, page_size: pageSize.value })
+    const params = {
+      page: page.value,
+      page_size: pageSize.value,
+    }
+    if (platform.value) params.platform = platform.value
+    if (bloggerSearch.value) params.blogger_name = bloggerSearch.value
+
+    const data = await fetchVideoSources(params)
     items.value = data.items || []
     total.value = data.total || 0
     schedulePollIfNeeded()
-    // 查询已有模板的视频
     const ids = items.value.map(i => i.id)
     if (ids.length) {
       templateMap.value = await fetchTemplatesByVideoSourceIds(ids)
@@ -269,6 +370,32 @@ async function loadData(silent = false) {
   }
 }
 
+function switchPlatform(val) {
+  platform.value = val
+  page.value = 1
+  jumpPage.value = 1
+  syncUrl()
+  loadData()
+}
+
+function onSearchInput() {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    jumpPage.value = 1
+    syncUrl()
+    loadData()
+  }, 400)
+}
+
+function clearSearch() {
+  bloggerSearch.value = ''
+  page.value = 1
+  jumpPage.value = 1
+  syncUrl()
+  loadData()
+}
+
 async function handleCreateTemplate(item) {
   creatingTemplate.value = item.id
   try {
@@ -277,7 +404,6 @@ async function handleCreateTemplate(item) {
       description: '',
       video_source_id: item.id,
     })
-    // 创建完立即启动 AI 分析
     await startVideoAITemplate(tpl.id)
     templateMap.value = { ...templateMap.value, [item.id]: tpl.id }
     router.push(`/dashboard/video-ai-templates/${tpl.id}/edit`)
@@ -297,14 +423,25 @@ function schedulePollIfNeeded() {
 }
 
 function goPage(p) {
-  page.value = p
+  const target = Math.max(1, Math.min(p, totalPages.value))
+  if (target === page.value) return
+  page.value = target
+  jumpPage.value = target
+  syncUrl()
   loadData()
 }
 
 function handleSizeChange(val) {
   pageSize.value = val
   page.value = 1
+  jumpPage.value = 1
+  syncUrl()
   loadData()
+}
+
+function doJump() {
+  const p = parseInt(jumpPage.value)
+  if (!isNaN(p)) goPage(p)
 }
 
 function openPlayer(item) {
@@ -313,12 +450,12 @@ function openPlayer(item) {
 }
 
 function goToDetail(item) {
+  syncUrl()
   router.push(`/dashboard/video-library/${item.id}`)
 }
 
 async function handleDownload(item) {
   downloading.value = item.id
-  // Optimistically update local state
   item.download_status = 'downloading'
   try {
     await downloadVideoSource(item.id)
@@ -398,6 +535,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearTimeout(pollTimer)
+  clearTimeout(searchTimer)
 })
 </script>
 
@@ -481,7 +619,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 .stat-card {
@@ -524,6 +662,106 @@ onUnmounted(() => {
 .stat-green {
   color: #10b981;
   font-weight: 600;
+}
+
+/* ── Filter bar ── */
+.vl-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.vl-platform-tabs {
+  display: flex;
+  gap: 6px;
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.vl-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.vl-tab:hover {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.vl-tab.active {
+  background: #fff;
+  color: #4f46e5;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.tab-icon-yt { color: #ef4444; }
+.tab-icon-tt { color: #000; }
+.tab-icon-ins { color: #c026d3; }
+
+.vl-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 260px;
+}
+
+.vl-search-icon {
+  position: absolute;
+  left: 10px;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.vl-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 32px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #334155;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.vl-search-input:focus {
+  border-color: #6366f1;
+}
+
+.vl-search-input::placeholder {
+  color: #cbd5e1;
+}
+
+.vl-search-clear {
+  position: absolute;
+  right: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px;
+}
+
+.vl-search-clear:hover {
+  color: #64748b;
 }
 
 /* ── Card grid ── */
@@ -810,57 +1048,6 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-/* ── Add new card ── */
-.vc-add {
-  border: 2px dashed #c7d2fe;
-  background: #fafbff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 240px;
-  transition: border-color 0.2s, background 0.2s;
-}
-
-.vc-add:hover {
-  border-color: #6366f1;
-  background: #eef2ff;
-  transform: none;
-  box-shadow: none;
-}
-
-.vc-add-inner {
-  text-align: center;
-}
-
-.vc-add-icon {
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  background: #eef2ff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 12px;
-  transition: background 0.2s;
-}
-
-.vc-add:hover .vc-add-icon {
-  background: #c7d2fe;
-}
-
-.vc-add-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #3730a3;
-  margin-bottom: 4px;
-}
-
-.vc-add-sub {
-  font-size: 13px;
-  color: #818cf8;
-}
-
 /* ── Footer ── */
 .vl-footer {
   display: flex;
@@ -868,6 +1055,8 @@ onUnmounted(() => {
   align-items: center;
   padding: 16px 0 8px;
   border-top: 1px solid #f1f5f9;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .vl-pagination-left {
@@ -898,13 +1087,15 @@ onUnmounted(() => {
 
 .vl-pagination {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .pg-btn {
   font-size: 13px;
   font-weight: 500;
-  padding: 7px 16px;
+  padding: 7px 14px;
   border-radius: 9px;
   border: 1px solid #e2e8f0;
   background: #fff;
@@ -922,6 +1113,60 @@ onUnmounted(() => {
 .pg-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.pg-num {
+  min-width: 36px;
+  padding: 7px 10px;
+  text-align: center;
+}
+
+.pg-num.active {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.pg-ellipsis {
+  font-size: 13px;
+  color: #94a3b8;
+  padding: 0 4px;
+  user-select: none;
+}
+
+.pg-jump-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #94a3b8;
+  margin-left: 4px;
+}
+
+.pg-jump-input {
+  width: 52px;
+  height: 34px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 13px;
+  color: #334155;
+  outline: none;
+  padding: 0 6px;
+}
+
+.pg-jump-input:focus {
+  border-color: #6366f1;
+}
+
+.pg-jump-input::-webkit-inner-spin-button,
+.pg-jump-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.pg-jump-go {
+  padding: 7px 12px;
 }
 
 /* ── Player dialog ── */
@@ -964,6 +1209,38 @@ onUnmounted(() => {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Tags + repeatable on card */
+.vc-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 4px;
+}
+
+.vc-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.vc-repeat-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #059669;
+  line-height: 1.6;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
   .vl-stats { grid-template-columns: repeat(2, 1fr); }
@@ -972,5 +1249,6 @@ onUnmounted(() => {
   .vl-page { padding: 16px; }
   .vl-stats { grid-template-columns: repeat(2, 1fr); }
   .vl-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .vl-filterbar { gap: 10px; }
 }
 </style>

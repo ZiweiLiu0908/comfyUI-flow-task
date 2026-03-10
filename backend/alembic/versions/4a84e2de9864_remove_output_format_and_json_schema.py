@@ -17,11 +17,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column('evolink_settings', 'understand_json_schema')
-    op.drop_column('evolink_settings', 'understand_output_format')
-    op.drop_column('pipeline_settings', 'understand_json_schema')
-    op.drop_column('pipeline_settings', 'understand_output_format')
-    # upscaling_api_url may not exist on all environments
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if inspector.has_table("evolink_settings"):
+        evolink_cols = {c["name"] for c in inspector.get_columns("evolink_settings")}
+        if "understand_json_schema" in evolink_cols:
+            op.drop_column('evolink_settings', 'understand_json_schema')
+        if "understand_output_format" in evolink_cols:
+            op.drop_column('evolink_settings', 'understand_output_format')
+    pipeline_cols = {c["name"] for c in inspector.get_columns("pipeline_settings")}
+    if "understand_json_schema" in pipeline_cols:
+        op.drop_column('pipeline_settings', 'understand_json_schema')
+    if "understand_output_format" in pipeline_cols:
+        op.drop_column('pipeline_settings', 'understand_output_format')
     op.execute("ALTER TABLE pipeline_settings DROP COLUMN IF EXISTS upscaling_api_url")
 
 
