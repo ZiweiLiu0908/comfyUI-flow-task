@@ -394,7 +394,26 @@
       </div>
       <div class="vai-pagination">
         <button class="pg-btn" :disabled="page <= 1" @click="goPage(page - 1)">← 上一页</button>
+        <!-- Page number buttons -->
+        <template v-for="p in visiblePages" :key="p">
+          <span v-if="p === '...'" class="pg-ellipsis">…</span>
+          <button v-else class="pg-btn pg-num" :class="{ active: p === page }" @click="goPage(p)">{{ p }}</button>
+        </template>
         <button class="pg-btn" :disabled="endIdx >= total" @click="goPage(page + 1)">下一页 →</button>
+        <!-- Jump to page -->
+        <span class="pg-jump-wrap">
+          跳至
+          <input
+            v-model.number="jumpPage"
+            class="pg-jump-input"
+            type="number"
+            :min="1"
+            :max="totalPages"
+            @keyup.enter="doJump"
+          />
+          页
+          <button class="pg-btn pg-jump-go" @click="doJump">GO</button>
+        </span>
       </div>
     </div>
 
@@ -431,8 +450,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchVideoAITemplates,
@@ -450,6 +469,7 @@ import { useAuth } from '../composables/useAuth'
 const { isAdmin } = useAuth()
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const deleting = ref(null)
@@ -457,8 +477,9 @@ const actioning = ref(null)
 const batchResuming = ref(false)
 const items = ref([])
 const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
+const page = ref(Number(route.query.page) || 1)
+const pageSize = ref(Number(route.query.page_size) || 20)
+const jumpPage = ref(page.value)
 const templateStats = ref({})
 
 const playerVisible = ref(false)
@@ -549,6 +570,27 @@ async function saveConfig() {
 
 const startIdx = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize.value + 1)
 const endIdx = computed(() => Math.min(page.value * pageSize.value, total.value))
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+
+const visiblePages = computed(() => {
+  const n = totalPages.value
+  const cur = page.value
+  if (n <= 7) return Array.from({ length: n }, (_, i) => i + 1)
+  const pages = []
+  pages.push(1)
+  if (cur > 3) pages.push('...')
+  for (let p = Math.max(2, cur - 1); p <= Math.min(n - 1, cur + 1); p++) pages.push(p)
+  if (cur < n - 2) pages.push('...')
+  pages.push(n)
+  return pages
+})
+
+function syncUrl() {
+  const query = {}
+  if (page.value > 1) query.page = String(page.value)
+  if (pageSize.value !== 20) query.page_size = String(pageSize.value)
+  router.replace({ query })
+}
 
 const STATUS_CONFIG = {
   pending: { label: '排队中', type: 'info' },
@@ -666,14 +708,25 @@ async function loadData() {
 }
 
 function goPage(p) {
-  page.value = p
+  const target = Math.max(1, Math.min(p, totalPages.value))
+  if (target === page.value) return
+  page.value = target
+  jumpPage.value = target
+  syncUrl()
   loadData()
 }
 
 function handleSizeChange(val) {
   pageSize.value = val
   page.value = 1
+  jumpPage.value = 1
+  syncUrl()
   loadData()
+}
+
+function doJump() {
+  const p = parseInt(jumpPage.value)
+  if (!isNaN(p)) goPage(p)
 }
 
 function openPlayer(item) {
@@ -682,10 +735,12 @@ function openPlayer(item) {
 }
 
 function goToDetail(item) {
+  syncUrl()
   router.push(`/dashboard/video-ai-templates/${item.id}/edit`)
 }
 
 function goToEdit(item) {
+  syncUrl()
   router.push(`/dashboard/video-ai-templates/${item.id}/edit`)
 }
 
@@ -774,6 +829,15 @@ async function loadStats() {
 }
 
 onMounted(() => {
+  loadData()
+  loadStats()
+})
+
+onActivated(() => {
+  const q = route.query
+  page.value = Number(q.page) || 1
+  pageSize.value = Number(q.page_size) || 20
+  jumpPage.value = page.value
   loadData()
   loadStats()
 })
@@ -1432,6 +1496,53 @@ onMounted(() => {
 .pg-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.pg-num.active {
+  background: #6366f1;
+  color: #fff;
+  border-color: #6366f1;
+}
+
+.pg-num {
+  min-width: 36px;
+  padding: 7px 10px;
+}
+
+.pg-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 4px;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.pg-jump-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #64748b;
+  margin-left: 4px;
+}
+
+.pg-jump-input {
+  width: 52px;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+  outline: none;
+  color: #475569;
+}
+
+.pg-jump-input:focus {
+  border-color: #6366f1;
+}
+
+.pg-jump-go {
+  padding: 7px 12px;
 }
 
 /* ── Player dialog ── */

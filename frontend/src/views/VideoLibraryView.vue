@@ -3,6 +3,16 @@
     <!-- ── Header ── -->
     <div class="vl-header">
       <h1 class="vl-title">视频库</h1>
+
+      <!-- Tag management entry -->
+      <div class="vl-tag-mgr-wrap">
+        <button class="vl-tag-mgr-btn" @click="openTagManager">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;flex-shrink:0"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          标签管理
+          <span v-if="tags.length" class="vl-tag-count">{{ tags.length }}</span>
+        </button>
+      </div>
+
       <div class="vl-header-actions">
         <el-button class="vl-create-tpl-btn" :loading="batchCreatingTemplate" @click="handleBatchCreateTemplates">
           <svg v-if="!batchCreatingTemplate" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:6px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -242,14 +252,97 @@
       <span v-if="playerItem.view_count != null">{{ formatCount(playerItem.view_count) }} 次播放</span>
     </div>
   </el-dialog>
+
+  <!-- ── Tag Manager Dialog ── -->
+  <el-dialog
+    v-model="tagMgrVisible"
+    title="标签管理"
+    width="480px"
+    align-center
+    destroy-on-close
+    class="tag-mgr-dialog"
+  >
+    <div class="tm-body">
+      <!-- Tag list -->
+      <div class="tm-list" v-if="tags.length">
+        <div v-for="tag in tags" :key="tag.id" class="tm-item">
+          <span
+            class="tm-color-dot"
+            :style="tag.color ? { background: tag.color } : { background: '#94a3b8' }"
+          ></span>
+          <span
+            class="tm-chip"
+            :style="tag.color ? { background: tag.color + '22', color: tag.color, borderColor: tag.color + '55' } : {}"
+          >{{ tag.name }}</span>
+          <span class="tm-spacer"></span>
+          <button
+            class="tm-del-btn"
+            :disabled="deletingTagId === tag.id"
+            @click="handleDeleteTag(tag)"
+            title="删除标签"
+          >
+            <svg v-if="deletingTagId !== tag.id" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            <span v-else class="tm-del-spin"></span>
+          </button>
+        </div>
+      </div>
+      <el-empty v-else description="暂无标签，快来创建第一个吧" :image-size="60" style="padding: 16px 0" />
+
+      <!-- Divider -->
+      <div class="tm-divider"></div>
+
+      <!-- Create new tag -->
+      <div class="tm-create">
+        <div class="tm-create-title">创建新标签</div>
+        <div class="tm-create-row">
+          <input
+            v-model.trim="newTagName"
+            class="tm-input"
+            placeholder="标签名称"
+            maxlength="50"
+            @keyup.enter="handleCreateTag"
+          />
+          <div class="tm-color-pick-wrap">
+            <input
+              type="color"
+              v-model="newTagColor"
+              class="tm-color-input"
+              title="选择颜色"
+            />
+            <span class="tm-color-preview" :style="{ background: newTagColor }"></span>
+          </div>
+          <button
+            class="tm-create-btn"
+            :disabled="!newTagName || creatingTag"
+            @click="handleCreateTag"
+          >
+            <span v-if="creatingTag">创建中…</span>
+            <span v-else>+ 创建</span>
+          </button>
+        </div>
+        <!-- Preset colors -->
+        <div class="tm-preset-colors">
+          <span
+            v-for="c in PRESET_COLORS"
+            :key="c"
+            class="tm-preset-dot"
+            :class="{ selected: newTagColor === c }"
+            :style="{ background: c }"
+            @click="newTagColor = c"
+          ></span>
+        </div>
+      </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchVideoSources, fetchVideoSourceStats, deleteVideoSource, downloadVideoSource, downloadAllVideosZip } from '../api/video_sources'
 import { batchCreateAndStartTemplates, createVideoAITemplate, startVideoAITemplate, fetchTemplatesByVideoSourceIds } from '../api/video_ai_templates'
+import { fetchTags, createTag, deleteTag } from '../api/tags'
 import { isDuplicateRequestError } from '../api/http'
 import { useAuth, getToken } from '../composables/useAuth'
 
@@ -275,6 +368,15 @@ const templateMap = ref({})
 const playerVisible = ref(false)
 const playerItem = ref(null)
 const downloadingAll = ref(false)
+
+// Tag manager state
+const tagMgrVisible = ref(false)
+const tags = ref([])
+const newTagName = ref('')
+const newTagColor = ref('#6366f1')
+const creatingTag = ref(false)
+const deletingTagId = ref(null)
+const PRESET_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#64748b']
 const batchCreatingTemplate = ref(false)
 let pollTimer = null
 let searchTimer = null
@@ -528,9 +630,71 @@ async function handleDownloadAll() {
   }
 }
 
+async function loadTags() {
+  try {
+    tags.value = await fetchTags()
+  } catch { /* ignore */ }
+}
+
+async function openTagManager() {
+  tagMgrVisible.value = true
+  await loadTags()
+}
+
+async function handleCreateTag() {
+  if (!newTagName.value || creatingTag.value) return
+  creatingTag.value = true
+  try {
+    await createTag({ name: newTagName.value, color: newTagColor.value })
+    newTagName.value = ''
+    newTagColor.value = '#6366f1'
+    await loadTags()
+    ElMessage.success('标签创建成功')
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '创建失败')
+  } finally {
+    creatingTag.value = false
+  }
+}
+
+async function handleDeleteTag(tag) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除标签「${tag.name}」？已使用该标签的视频将自动解除关联。`,
+      '删除标签',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  deletingTagId.value = tag.id
+  try {
+    await deleteTag(tag.id)
+    await loadTags()
+    ElMessage.success('已删除')
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '删除失败')
+  } finally {
+    deletingTagId.value = null
+  }
+}
+
 onMounted(() => {
   loadStats()
   loadData()
+  loadTags()
+})
+
+// When navigating back from detail page (keep-alive scenario),
+// re-sync state from URL and reload data
+onActivated(() => {
+  const q = route.query
+  page.value = Number(q.page) || 1
+  pageSize.value = Number(q.page_size) || 20
+  platform.value = q.platform || ''
+  bloggerSearch.value = q.blogger || ''
+  jumpPage.value = page.value
+  loadStats()
+  loadData()
+  loadTags()
 })
 
 onUnmounted(() => {
@@ -560,6 +724,254 @@ onUnmounted(() => {
   color: #0f172a;
   letter-spacing: -0.03em;
   margin: 0;
+}
+
+.vl-tag-mgr-wrap {
+  display: flex;
+  align-items: center;
+  margin: 0 24px;
+}
+
+.vl-tag-mgr-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.vl-tag-mgr-btn:hover {
+  border-color: #6366f1;
+  color: #6366f1;
+  background: #eef2ff;
+}
+
+.vl-tag-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 9px;
+}
+
+/* ── Tag Manager Dialog ── */
+.tm-body {
+  padding: 4px 0;
+}
+
+.tm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-bottom: 4px;
+}
+
+.tm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  transition: background 0.15s;
+}
+
+.tm-item:hover {
+  background: #f1f5f9;
+}
+
+.tm-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tm-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.tm-spacer {
+  flex: 1;
+}
+
+.tm-del-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.tm-del-btn:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.tm-del-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tm-del-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #e2e8f0;
+  border-top-color: #ef4444;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.tm-divider {
+  height: 1px;
+  background: #f1f5f9;
+  margin: 16px 0;
+}
+
+.tm-create {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tm-create-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.tm-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tm-input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #334155;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.tm-input:focus {
+  border-color: #6366f1;
+}
+
+.tm-color-pick-wrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.tm-color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tm-color-preview {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  border: 2px solid #e2e8f0;
+  pointer-events: none;
+}
+
+.tm-create-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 9px;
+  border: none;
+  background: #6366f1;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.tm-create-btn:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.tm-create-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tm-preset-colors {
+  display: flex;
+  gap: 8px;
+}
+
+.tm-preset-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.tm-preset-dot:hover {
+  transform: scale(1.2);
+}
+
+.tm-preset-dot.selected {
+  border-color: #1e293b;
+  transform: scale(1.15);
 }
 
 .vl-header-actions {
