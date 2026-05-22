@@ -1318,6 +1318,7 @@ class SupplementFiltersBody(BaseModel):
     min_view_count: int | None = None
     published_after: date | None = None
     max_duration_seconds: int | None = None
+    category_indices: list[int] | None = None
 
 
 class SupplementTemplatesBody(BaseModel):

@@ -115,14 +115,19 @@ export async function exportVideoUrls(accountIds) {
 }
 
 function _normalizeFilters(filters = {}) {
+  filters = filters || {}
   // 把空值 / 0 视为不限，转 null
   const minV = filters.min_view_count
   const pub = filters.published_after
   const dur = filters.max_duration_seconds
+  const cats = Array.isArray(filters.category_indices)
+    ? filters.category_indices.filter(v => Number.isInteger(v) && v >= 0 && v <= 13)
+    : []
   return {
     min_view_count: typeof minV === 'number' && minV > 0 ? minV : null,
     published_after: pub || null,
     max_duration_seconds: typeof dur === 'number' && dur > 0 ? dur : null,
+    category_indices: cats.length ? cats : null,
   }
 }
 

@@ -38,6 +38,59 @@ from app.services.account_operation_guard import BLOCKED_ACCOUNT_STATUSES
 logger = logging.getLogger("app.external_supplement_service")
 
 
+def _normalize_category_indices(filters: dict | None) -> list[int]:
+    """Return unique category indices in the supported 0-13 range."""
+    if not filters:
+        return []
+    raw = filters.get("category_indices")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        values = [part.strip() for part in raw.split(",")]
+    elif isinstance(raw, (list, tuple, set)):
+        values = list(raw)
+    else:
+        values = [raw]
+
+    result: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        try:
+            idx = int(value)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx > 13 or idx in seen:
+            continue
+        seen.add(idx)
+        result.append(idx)
+    return result
+
+
+def _resolve_supplement_allowed_indices(mode: str, account: Any, filters: dict | None) -> list[int]:
+    """Resolve classification filter indices for supplement callback processing.
+
+    exclusive mode only filters when request filters explicitly include category_indices.
+    auto mode keeps the existing account single/dual classification behavior.
+    """
+    if mode == "exclusive":
+        return _normalize_category_indices(filters)
+    if mode != "auto":
+        return []
+
+    cls_type = getattr(account, "classification_type", None)
+    summary = getattr(account, "classification_summary", None) or {}
+    allowed_indices: list[int] = []
+    primary_index = summary.get("primary_index")
+    secondary_index = summary.get("secondary_index")
+    if cls_type not in ("single", "dual"):
+        return []
+    if isinstance(primary_index, int):
+        allowed_indices.append(primary_index)
+    if cls_type == "dual" and isinstance(secondary_index, int):
+        allowed_indices.append(secondary_index)
+    return allowed_indices
+
+
 # ── outbound: 我们 → vendor ────────────────────────────────────────────────────
 
 def _vendor_configured() -> bool:
@@ -434,6 +487,7 @@ async def handle_supplement_callback(
                 owner_id=owner_id,
                 mode=mode,
                 request_id=request_id,
+                request_filters=req.filters or {},
             )
         )
 
@@ -496,13 +550,14 @@ async def _post_callback_pipeline(
     owner_id: uuid.UUID | None,
     mode: str,
     request_id: uuid.UUID,
+    request_filters: dict | None = None,
 ) -> None:
     """单条视频的后处理：
 
       1. 把 gs:// 下载到本地 tmp
       2. 上传到我们的存储（GCS 或 CDN，由 video_upload_backend 决定）→ 拿 permanent URL
       3. AI 审核（如 pipeline_settings.candidate_ai_review_enabled）— 不通过则丢弃
-      4. mode=auto：调 Gemini 分类，对账号 single/dual 大类不匹配则丢弃
+      4. mode=auto 或 exclusive 指定 category_indices：调 Gemini 分类，不匹配则丢弃
       5. 通过的：写 video_sources + video_ai_template(pending) + 绑定 tag
       6. 触发 AI pipeline（enqueue_template）
     """
@@ -569,26 +624,27 @@ async def _post_callback_pipeline(
     ai_review_prompt = search_cfg.ai_review_prompt if search_cfg else ""
     retry_delay = search_cfg.retry_delay if search_cfg else 30.0
 
-    # auto 模式：解出允许的小类 index（single → primary_index；dual → primary + secondary）
-    allowed_indices: list[int] = []
-    if mode == "auto":
-        cls_type = account.classification_type
-        summary = account.classification_summary or {}
-        primary_index = summary.get("primary_index")
-        secondary_index = summary.get("secondary_index")
-        if cls_type not in ("single", "dual"):
-            logger.info(
-                "[ext_supp] auto 模式但账号 %s 分类=%s，跳过",
-                account_id, cls_type,
-            )
-            return
-        if isinstance(primary_index, int):
-            allowed_indices.append(primary_index)
-        if cls_type == "dual" and isinstance(secondary_index, int):
-            allowed_indices.append(secondary_index)
-        if not allowed_indices:
-            logger.info("[ext_supp] auto 模式但 account %s 无法确定允许小类，跳过", account_id)
-            return
+    allowed_indices = _resolve_supplement_allowed_indices(mode, account, request_filters)
+    if mode == "auto" and not allowed_indices:
+        logger.info(
+            "[ext_supp] auto 模式但账号 %s 分类=%s，跳过",
+            account_id, account.classification_type,
+        )
+        return
+    should_classify = mode == "auto" or bool(allowed_indices)
+
+    if allowed_indices:
+        logger.info(
+            "[ext_supp] request_id=%s mode=%s 启用分类过滤 allowed_indices=%s account=%s",
+            request_id, mode, allowed_indices, account_id,
+        )
+    elif mode == "exclusive":
+        logger.info(
+            "[ext_supp] request_id=%s 补充人设未设置分类过滤，按原逻辑入库 account=%s",
+            request_id, account_id,
+        )
+
+    category_index: int | None = None
 
     try:
         ensure_free_space(min_bytes=500 * 1024 * 1024, label="external_supplement")
@@ -651,15 +707,14 @@ async def _post_callback_pipeline(
             return
         logger.info("[ext_supp] AI 审核通过 source_url=%s", source_url)
 
-    # 3. auto 模式：Gemini 分类 + 小类 index 严格匹配
-    if mode == "auto":
+    # 3. 分类过滤：auto 强制分类；exclusive 仅在用户设置 category_indices 时分类
+    if should_classify:
         try:
             category_index = await _classify_video_for_auto_supplement(permanent_url, owner_id)
         except Exception as exc:
             logger.warning("[ext_supp] 分类异常 source_url=%s: %s", source_url, exc)
-            category_index = None
         if category_index is None:
-            logger.info("[ext_supp] auto 分类失败，丢弃 source_url=%s", source_url)
+            logger.info("[ext_supp] 分类失败，丢弃 source_url=%s", source_url)
             await _append_rejected_video(request_id, _rejected_entry(
                 video, account_id,
                 reason_type="classify_failed",
@@ -669,18 +724,20 @@ async def _post_callback_pipeline(
             return
         if category_index not in allowed_indices:
             logger.info(
-                "[ext_supp] auto 分类 idx=%s ∉ 允许 %s，丢弃 source_url=%s",
+                "[ext_supp] 分类 idx=%s ∉ 允许 %s，丢弃 source_url=%s",
                 category_index, allowed_indices, source_url,
             )
+            from app.services.video_classification_service import CATEGORY_LABELS
             await _append_rejected_video(request_id, _rejected_entry(
                 video, account_id,
                 reason_type="classify_unmatched",
                 reason=f"分类 idx={category_index} 不在允许小类 {allowed_indices}",
                 category_index=category_index,
+                category_label=CATEGORY_LABELS.get(category_index),
                 allowed_indices=allowed_indices,
             ))
             return
-        logger.info("[ext_supp] auto 分类匹配 idx=%s source_url=%s", category_index, source_url)
+        logger.info("[ext_supp] 分类匹配 idx=%s source_url=%s", category_index, source_url)
 
     # 4. 写库（写 video_sources + template + 绑 tag）
     try:
@@ -718,6 +775,20 @@ async def _post_callback_pipeline(
             )
             session.add(vs)
             await session.flush()
+
+            if category_index is not None:
+                from app.models.video_classification import VideoClassification
+                from app.services.video_classification_service import CATEGORY_MAJOR
+
+                session.add(VideoClassification(
+                    video_source_id=vs.id,
+                    owner_id=owner_id,
+                    status="success",
+                    category_index=category_index,
+                    major_category=CATEGORY_MAJOR.get(category_index),
+                    raw_response=str({"category_index": category_index}),
+                    classified_at=datetime.now(timezone.utc),
+                ))
 
             tpl = VideoAITemplate(
                 owner_id=owner_id,

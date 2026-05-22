@@ -609,7 +609,7 @@
     <el-dialog
       v-model="showSupplementDialog"
       title="补充模板"
-      width="480px"
+      width="640px"
       :close-on-click-modal="false"
     >
       <div class="al-supplement-body">
@@ -719,6 +719,28 @@
                 style="width:180px"
               />
               <span class="al-supplement-filter-hint">视频时长 ≤ 该值</span>
+            </div>
+            <div v-if="supplementForm.templateType === 'exclusive'" class="al-supplement-category-filter">
+              <div class="al-supplement-category-head">
+                <span>视频类别</span>
+                <button
+                  v-if="supplementForm.categoryIndices.length"
+                  type="button"
+                  class="al-supplement-clear-cats"
+                  @click="supplementForm.categoryIndices = []"
+                >清空</button>
+              </div>
+              <el-checkbox-group v-model="supplementForm.categoryIndices" class="al-supplement-category-grid">
+                <el-checkbox-button
+                  v-for="cat in CATEGORY_OPTIONS"
+                  :key="cat.index"
+                  :value="cat.index"
+                  :label="cat.index"
+                >
+                  {{ cat.label }}
+                </el-checkbox-button>
+              </el-checkbox-group>
+              <div class="al-supplement-filter-hint">不选择 = 不按类别过滤；选择后系统会先分类每条视频，只入库命中的类别</div>
             </div>
           </div>
         </div>
@@ -2982,6 +3004,7 @@ const supplementForm = ref({
   minViewCount: 10000,
   publishedAfter: '2024-01-01',
   maxDurationSeconds: 30,
+  categoryIndices: [],
 })
 
 
@@ -2992,6 +3015,7 @@ function openSupplementDialog() {
     minViewCount: 10000,
     publishedAfter: '2024-01-01',
     maxDurationSeconds: 30,
+    categoryIndices: [],
   }
   showSupplementDialog.value = true
 }
@@ -3030,6 +3054,9 @@ async function handleSupplement() {
         min_view_count: supplementForm.value.minViewCount,
         published_after: supplementForm.value.publishedAfter,
         max_duration_seconds: supplementForm.value.maxDurationSeconds,
+        category_indices: supplementForm.value.templateType === 'exclusive'
+          ? [...supplementForm.value.categoryIndices]
+          : [],
       }
   const target = supplementForm.value.targetVideoCount
   try {
@@ -5380,6 +5407,38 @@ onMounted(() => {
 .al-supplement-filter-hint {
   font-size: 12px;
   color: #94a3b8;
+}
+.al-supplement-category-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+.al-supplement-category-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #475569;
+}
+.al-supplement-clear-cats {
+  border: 0;
+  background: transparent;
+  color: #6366f1;
+  cursor: pointer;
+  font-size: 12px;
+}
+.al-supplement-category-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.al-supplement-category-grid :deep(.el-checkbox-button__inner) {
+  border-radius: 999px !important;
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  font-size: 12px;
+  box-shadow: none !important;
 }
 
 /* AI 配置弹窗内容 */
