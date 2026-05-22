@@ -33,6 +33,7 @@ class Account(Base):
     photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # 博主照片（AI选出的候选）
     performance_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     hashtags: Mapped[list | None] = mapped_column(JSON, nullable=True)  # TikTok hashtag 列表
+    platform_binding_status: Mapped[str] = mapped_column(String(30), nullable=False, default="unbound", index=True)
 
     # AI 生成状态
     ai_generation_status: Mapped[str] = mapped_column(String(40), nullable=False, default="idle")

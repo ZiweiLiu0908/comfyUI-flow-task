@@ -343,6 +343,14 @@
               账号列表展示「成功率」时取最近 N 条子任务；分子 = 暂存 + 队列中 + 已发布，分母 = 暂存 + 待决策 + 决策未通过 + 队列中 + 已发布
             </span>
           </el-form-item>
+          <el-form-item label="Shadowban 最近 N 条">
+            <el-input-number v-model="aiSettingsForm.shadowban_video_sample_count" :min="1" :max="200" style="width: 160px" />
+            <span style="margin-left:8px;color:#6b7280;font-size:13px">每天 08:30 只看最近 N 条有播放量数据的视频</span>
+          </el-form-item>
+          <el-form-item label="Shadowban 播放量阈值">
+            <el-input-number v-model="aiSettingsForm.shadowban_view_threshold" :min="0" :max="100000000" :step="50" style="width: 160px" />
+            <span style="margin-left:8px;color:#6b7280;font-size:13px">N 条播放量都 ≤ 此值时标记为 Shadowban，标记后不自动恢复</span>
+          </el-form-item>
           <el-form-item label="">
             <el-button
               type="warning"
@@ -997,6 +1005,8 @@
           <option value="">平台绑定 · 全部</option>
           <option value="bound">已绑定</option>
           <option value="confirmed">已确认</option>
+          <option value="disabled">已禁用</option>
+          <option value="shadowban">Shadowban</option>
           <option value="unbound">未绑定</option>
         </select>
         <select class="al-col-filter-select" v-model="filterClassificationType" @change="onClassificationTypeChange">
@@ -1850,6 +1860,37 @@ const pageSize = ref(20)
 // Map<id, account对象> 跨页保留完整 account 信息
 const selectedMap = ref(new Map())
 const selectedIds = computed(() => new Set(selectedMap.value.keys()))
+const BLOCKED_ACCOUNT_OPERATION_STATUSES = new Set(['disabled', 'shadowban'])
+const BLOCKED_ACCOUNT_STATUS_LABELS = {
+  disabled: '已禁用',
+  shadowban: 'Shadowban',
+}
+
+function filterOperableAccounts(accounts = []) {
+  const accountIds = []
+  const skipReasons = {}
+  for (const account of accounts) {
+    const status = account?.platform_binding_status
+    if (BLOCKED_ACCOUNT_OPERATION_STATUSES.has(status)) {
+      skipReasons[status] = (skipReasons[status] || 0) + 1
+      continue
+    }
+    if (account?.id) accountIds.push(account.id)
+  }
+  const skipped = Object.values(skipReasons).reduce((sum, count) => sum + count, 0)
+  return { accountIds, skipped, skipReasons }
+}
+
+function formatBlockedAccountSkipReasons(skipReasons = {}) {
+  return Object.entries(skipReasons)
+    .map(([status, count]) => `${BLOCKED_ACCOUNT_STATUS_LABELS[status] || status} ${count} 个`)
+    .join('，')
+}
+
+function warnSkippedBlockedAccounts(skipReasons = {}) {
+  const text = formatBlockedAccountSkipReasons(skipReasons)
+  if (text) ElMessage.warning(`已跳过不可操作账号：${text}`)
+}
 
 // 已勾选 AI 博主聚合统计：缺失/0 值不参与平均
 const selectionStats = computed(() => {
@@ -2367,6 +2408,8 @@ const aiSettingsForm = ref({
   tier_daily_formal_growth_min_rate: 0.0,
   tier_daily_formal_growth_max_rate: 0.06,
   sub_task_success_sample_size: 10,
+  shadowban_video_sample_count: 7,
+  shadowban_view_threshold: 0,
 })
 
 async function openAISettings() {
@@ -2406,6 +2449,8 @@ async function openAISettings() {
     aiSettingsForm.value.tier_daily_formal_growth_min_rate = data.tier_daily_formal_growth_min_rate ?? 0.0
     aiSettingsForm.value.tier_daily_formal_growth_max_rate = data.tier_daily_formal_growth_max_rate ?? 0.06
     aiSettingsForm.value.sub_task_success_sample_size = data.sub_task_success_sample_size ?? 10
+    aiSettingsForm.value.shadowban_video_sample_count = data.shadowban_video_sample_count ?? 7
+    aiSettingsForm.value.shadowban_view_threshold = data.shadowban_view_threshold ?? 0
   } catch (err) {
     ElMessage.error(err?.response?.data?.detail || '加载配置失败')
   } finally {
@@ -2451,6 +2496,8 @@ async function saveAISettings() {
       tier_daily_formal_growth_min_rate: aiSettingsForm.value.tier_daily_formal_growth_min_rate,
       tier_daily_formal_growth_max_rate: aiSettingsForm.value.tier_daily_formal_growth_max_rate,
       sub_task_success_sample_size: aiSettingsForm.value.sub_task_success_sample_size,
+      shadowban_video_sample_count: aiSettingsForm.value.shadowban_video_sample_count,
+      shadowban_view_threshold: aiSettingsForm.value.shadowban_view_threshold,
     }
     await updatePipelineSettings(payload)
     ElMessage.success('配置已保存')
@@ -2807,10 +2854,10 @@ async function startBulkVideoGenerate() {
 
   try {
     const isSelection = selectedMap.value.size > 0
-    let accountIds = []
+    let accounts = []
 
     if (isSelection) {
-      accountIds = [...selectedMap.value.values()].map(a => a.id)
+      accounts = [...selectedMap.value.values()]
     } else {
       const params = { page: 1, page_size: 9999 }
       if (filterGender.value) params.gender = filterGender.value
@@ -2822,11 +2869,14 @@ async function startBulkVideoGenerate() {
       if (filterClassificationType.value) params.classification_type = filterClassificationType.value
       if (filterCategoryIndices.value.length > 0) params.category_indices = filterCategoryIndices.value.join(',')
       const data = await fetchAccounts(params)
-      accountIds = (data.items || []).map(a => a.id)
+      accounts = data.items || []
     }
 
+    const { accountIds, skipReasons } = filterOperableAccounts(accounts)
+    warnSkippedBlockedAccounts(skipReasons)
+
     if (accountIds.length === 0) {
-      ElMessage.info('没有可操作的账号')
+      ElMessage.info('当前账号都处于已禁用或 Shadowban，无法操作')
       return
     }
 
@@ -2951,18 +3001,26 @@ async function handleSupplement() {
   supplementing.value = true
 
   const isSelection = selectedMap.value.size > 0
-  let accountIds = []
+  let accounts = []
   if (isSelection) {
-    accountIds = [...selectedMap.value.keys()]
+    accounts = [...selectedMap.value.values()]
   } else {
     try {
       const data = await fetchAccounts({ page: 1, page_size: 9999 })
-      accountIds = (data.items || []).map(a => a.id)
+      accounts = data.items || []
     } catch {
       ElMessage.error('加载账号列表失败')
       supplementing.value = false
       return
     }
+  }
+
+  const { accountIds, skipReasons } = filterOperableAccounts(accounts)
+  warnSkippedBlockedAccounts(skipReasons)
+  if (accountIds.length === 0) {
+    ElMessage.info('当前账号都处于已禁用或 Shadowban，无法操作')
+    supplementing.value = false
+    return
   }
 
   // shared 模式不使用弹窗过滤条件（走内部 pipeline_settings 默认）

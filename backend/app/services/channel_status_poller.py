@@ -26,6 +26,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.account_channel_reservation import AccountChannelReservation
+from app.services.account_service import recompute_account_platform_binding_status
 
 logger = logging.getLogger("app.channel_status_poller")
 
@@ -289,6 +290,7 @@ async def _run_once(
                     obj = await session.get(AccountChannelReservation, r.id)
                     if obj is not None:
                         obj.channel_status = new_status
+                        await recompute_account_platform_binding_status(session, obj.account_id)
                         await session.commit()
                         current_status = new_status
                         logger.info(

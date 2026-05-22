@@ -30,6 +30,7 @@ from app.services.open_api_signing import (
     sign_params as _shared_sign_params,
     value_to_sign_str as _shared_value_to_sign_str,
 )
+from app.services.account_service import recompute_account_platform_binding_status
 from app.services.promotion_code_service import promotion_code_distributor
 
 logger = logging.getLogger("app.video_publication_service")
@@ -566,6 +567,8 @@ async def _disable_suspended_channel_reservations(
             "account_id=%s platform=%s channel_id=%s reservation_id=%s",
             account_id, platform, channel_id, reservation.id,
         )
+    if disabled:
+        await recompute_account_platform_binding_status(db, account_id)
     return disabled
 
 

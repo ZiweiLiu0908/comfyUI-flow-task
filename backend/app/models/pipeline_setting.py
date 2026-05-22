@@ -145,6 +145,10 @@ class PipelineSetting(Base):
     # 「最近 N 条子任务的成功率」公式里 N 的样本量
     sub_task_success_sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
 
+    # Shadowban 判定：最近 N 条有播放量数据的视频均 <= 阈值则标记账号
+    shadowban_video_sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    shadowban_view_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # 「有CTA」版本的 9 个 prompt（与同名无 _cta 字段对应；启用见 video_task.cta）
     outfit_select_prompt_cta: Mapped[str] = mapped_column(Text, nullable=False, default="")
     outfit_detail_prompt_cta: Mapped[str] = mapped_column(Text, nullable=False, default="")

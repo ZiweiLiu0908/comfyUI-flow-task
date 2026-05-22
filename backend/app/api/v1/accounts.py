@@ -43,6 +43,11 @@ from app.services.account_service import (
     list_accounts,
     bulk_update_account_attributes,
     patch_account,
+    recompute_account_platform_binding_status,
+)
+from app.services.account_operation_guard import (
+    BLOCKED_ACCOUNT_STATUS_LABELS,
+    filter_operable_account_ids,
 )
 from app.services.channel_status_poller import refresh_reservation_channel_status
 
@@ -296,6 +301,8 @@ async def _sync_channel_reservations_from_bindings(
         if platform not in desired and reservation.status == "bound" and reservation.confirmed_at is None:
             await session.delete(reservation)
 
+    await session.flush()
+    await recompute_account_platform_binding_status(session, account.id)
     await session.commit()
 
 
@@ -663,6 +670,7 @@ async def reserve_ai_accounts_for_channel(
             )
             session.add(reservation)
             try:
+                await recompute_account_platform_binding_status(session, account.id)
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
@@ -723,6 +731,8 @@ async def confirm_channel_reservations(
             reservation.status = "confirmed"
             reservation.confirmed_at = reservation.confirmed_at or now
         confirmed_ids.append(reservation.id)
+    for account_id in {reservation.account_id for reservation in rows}:
+        await recompute_account_platform_binding_status(session, account_id)
     await session.commit()
     return ConfirmChannelReservationsResponse(
         status="confirmed",
@@ -766,6 +776,7 @@ async def bind_openapi_channel(
         )
     _apply_channel_binding(reservation, binding, now=now)
     await refresh_reservation_channel_status(reservation)
+    await recompute_account_platform_binding_status(session, account_id)
 
     await session.commit()
     await session.refresh(account)
@@ -830,6 +841,8 @@ async def delete_channel_reservation(
             detail="只能删除已绑定（bound）状态的频道",
         )
     await session.delete(reservation)
+    await session.flush()
+    await recompute_account_platform_binding_status(session, account_id)
     await session.commit()
     return Response(status_code=204)
 
@@ -1329,6 +1342,7 @@ class BulkGenerateVideoTasksBody(BaseModel):
 
 
 _BULK_VIDEO_TASK_SKIP_REASON_LABELS = {
+    **BLOCKED_ACCOUNT_STATUS_LABELS,
     "account_missing": "账号不存在",
     "classification_unavailable": "分类结果不可用",
     "no_tags": "未绑定标签",
@@ -1343,6 +1357,13 @@ _BULK_VIDEO_TASK_SKIP_REASON_LABELS = {
 
 def _bulk_skip_reason_label(reason: str) -> str:
     return _BULK_VIDEO_TASK_SKIP_REASON_LABELS.get(reason, reason)
+
+
+def _format_skip_reasons(skip_reasons: dict[str, int]) -> str:
+    return "，".join(
+        f"{_bulk_skip_reason_label(reason)} {count} 个"
+        for reason, count in sorted(skip_reasons.items())
+    )
 
 
 async def _load_bulk_video_task_templates(
@@ -1682,12 +1703,27 @@ async def bulk_generate_video_tasks(
     if body.fill_mode == "target_total" and body.limit <= 0:
         raise HTTPException(status_code=422, detail="fill_mode=target_total 时 limit 必须 > 0")
 
+    operable_account_ids, blocked_skip_reasons = await filter_operable_account_ids(
+        session,
+        body.account_ids,
+        owner_id=owner_id,
+    )
+    if not operable_account_ids:
+        return {
+            "status": "no_operable_accounts",
+            "planned": 0,
+            "skipped_accounts": len(body.account_ids),
+            "skip_reasons": blocked_skip_reasons,
+            "account_count": len(body.account_ids),
+            "message": f"无可操作账号，已跳过 {_format_skip_reasons(blocked_skip_reasons)}",
+        }
+
     use_used = body.mode == "used"
     total_planned = 0
-    total_skipped = 0
-    skip_reasons: dict[str, int] = {}
+    total_skipped = len(body.account_ids) - len(operable_account_ids)
+    skip_reasons: dict[str, int] = dict(blocked_skip_reasons)
 
-    for account_id in body.account_ids:
+    for account_id in operable_account_ids:
         try:
             items_to_use, _vs_map, skip_reason = await _resolve_account_pool(
                 session,
@@ -1721,7 +1757,7 @@ async def bulk_generate_video_tasks(
 
     asyncio.create_task(
         _run_bulk_generate_video_tasks(
-            account_ids=body.account_ids,
+            account_ids=operable_account_ids,
             owner_id=owner_id,
             user_id=current_user.user_id,
             mode=body.mode,
@@ -1752,6 +1788,7 @@ async def supplement_templates(
     body: SupplementTemplatesBody,
     creator_id: uuid.UUID = Depends(_get_creator_id),
     owner_id: uuid.UUID | None = Depends(_get_owner_id),
+    session: AsyncSession = Depends(get_db),
 ):
     """
     为指定账号批量补充模板（后台异步执行，立即返回）。
@@ -1772,6 +1809,19 @@ async def supplement_templates(
     target_count = _resolve_target_count(body)
     effective_owner = owner_id if owner_id is not None else creator_id
     filters_dict = body.filters.model_dump(mode="json", exclude_none=True) if body.filters else {}
+    operable_account_ids, blocked_skip_reasons = await filter_operable_account_ids(
+        session,
+        body.account_ids,
+        owner_id=owner_id,
+    )
+    blocked_count = len(body.account_ids) - len(operable_account_ids)
+    if not operable_account_ids:
+        return {
+            "message": f"无可操作账号，已跳过 {_format_skip_reasons(blocked_skip_reasons)}",
+            "count": 0,
+            "skipped_accounts": blocked_count,
+            "skip_reasons": blocked_skip_reasons,
+        }
 
     # exclusive 模式：只走 vendor，失败/未配置直接报错
     if template_type == "exclusive":
@@ -1780,7 +1830,7 @@ async def supplement_templates(
         try:
             result = await submit_supplement_request(
                 owner_id=effective_owner,
-                account_ids=body.account_ids,
+                account_ids=operable_account_ids,
                 mode="exclusive",
                 target_video_count=target_count,
                 filters=filters_dict,
@@ -1791,22 +1841,26 @@ async def supplement_templates(
         return {
             "message": f"已委托 vendor 为 {result['submitted_items']} 个账号补充模板",
             "count": result["submitted_items"],
-            "skipped_accounts": result["skipped_accounts"],
+            "skipped_accounts": blocked_count + result["skipped_accounts"],
+            "skip_reasons": blocked_skip_reasons,
             "request_id": result["request_id"],
         }
 
     # shared 模式：内部 candidate_service
     _asyncio.create_task(
         supplement_templates_for_accounts(
-            account_ids=body.account_ids,
+            account_ids=operable_account_ids,
             owner_id=effective_owner,
             template_type=template_type,
             max_new_videos=target_count,
         )
     )
+    skipped_text = f"，已跳过 {_format_skip_reasons(blocked_skip_reasons)}" if blocked_count else ""
     return {
-        "message": f"已为 {len(body.account_ids)} 个账号启动共享补充模板任务（内部路径）",
-        "count": len(body.account_ids),
+        "message": f"已为 {len(operable_account_ids)} 个账号启动共享补充模板任务（内部路径）{skipped_text}",
+        "count": len(operable_account_ids),
+        "skipped_accounts": blocked_count,
+        "skip_reasons": blocked_skip_reasons,
     }
 
 
@@ -1822,6 +1876,7 @@ async def auto_supplement_templates(
     body: AutoSupplementBody,
     creator_id: uuid.UUID = Depends(_get_creator_id),
     owner_id: uuid.UUID | None = Depends(_get_owner_id),
+    session: AsyncSession = Depends(get_db),
 ):
     """
     根据 AI 博主分类类型自动补充匹配视频模板。
@@ -1837,13 +1892,26 @@ async def auto_supplement_templates(
     target_count = _resolve_target_count(body)
     effective_owner = owner_id if owner_id is not None else creator_id
     filters_dict = body.filters.model_dump(mode="json", exclude_none=True) if body.filters else {}
+    operable_account_ids, blocked_skip_reasons = await filter_operable_account_ids(
+        session,
+        body.account_ids,
+        owner_id=owner_id,
+    )
+    blocked_count = len(body.account_ids) - len(operable_account_ids)
+    if not operable_account_ids:
+        return {
+            "message": f"无可操作账号，已跳过 {_format_skip_reasons(blocked_skip_reasons)}",
+            "count": 0,
+            "skipped_accounts": blocked_count,
+            "skip_reasons": blocked_skip_reasons,
+        }
 
     if not _vendor_configured():
         raise HTTPException(status_code=503, detail="vendor 未配置（VENDOR_SUPPLEMENT_API_URL / API_KEY）")
     try:
         result = await submit_supplement_request(
             owner_id=effective_owner,
-            account_ids=body.account_ids,
+            account_ids=operable_account_ids,
             mode="auto",
             target_video_count=target_count,
             filters=filters_dict,
@@ -1854,7 +1922,8 @@ async def auto_supplement_templates(
     return {
         "message": f"已委托 vendor 为 {result['submitted_items']} 个账号自动补充",
         "count": result["submitted_items"],
-        "skipped_accounts": result["skipped_accounts"],
+        "skipped_accounts": blocked_count + result["skipped_accounts"],
+        "skip_reasons": blocked_skip_reasons,
         "request_id": result["request_id"],
     }
 

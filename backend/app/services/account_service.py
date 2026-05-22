@@ -26,6 +26,40 @@ _TABLE_SORT_FIELDS = {
 }
 
 
+async def recompute_account_platform_binding_status(
+    session: AsyncSession,
+    account_id: UUID,
+) -> str | None:
+    await session.flush()
+    account = await session.get(Account, account_id)
+    if account is None:
+        return None
+    if account.platform_binding_status == "shadowban":
+        return "shadowban"
+
+    rows = (
+        await session.execute(
+            select(AccountChannelReservation.status, AccountChannelReservation.channel_status)
+            .where(AccountChannelReservation.account_id == account_id)
+        )
+    ).all()
+
+    if not rows:
+        new_status = "unbound"
+    else:
+        bound_rows = [row for row in rows if row[0] == "bound"]
+        if bound_rows:
+            all_bound_disabled = all((channel_status or "active") == "disabled" for _, channel_status in bound_rows)
+            new_status = "disabled" if all_bound_disabled else "bound"
+        elif any(status in ("confirmed", "reserved") for status, _ in rows):
+            new_status = "confirmed"
+        else:
+            new_status = "unbound"
+
+    account.platform_binding_status = new_status
+    return new_status
+
+
 async def create_account(
     session: AsyncSession,
     payload: AccountCreate,
@@ -134,20 +168,8 @@ async def list_accounts(
         stmt = stmt.where(Account.account_tier == account_tier)
         total_stmt = total_stmt.where(Account.account_tier == account_tier)
     if platform_binding_status:
-        # "bound" = has at least one reservation with status='bound'
-        # "confirmed" = has at least one reservation with status='confirmed'
-        # "unbound" = has no reservations at all
-        if platform_binding_status == "unbound":
-            bound_subq = select(AccountChannelReservation.account_id)
-            stmt = stmt.where(~Account.id.in_(bound_subq))
-            total_stmt = total_stmt.where(~Account.id.in_(bound_subq))
-        elif platform_binding_status in ("bound", "confirmed"):
-            status_subq = (
-                select(AccountChannelReservation.account_id)
-                .where(AccountChannelReservation.status == platform_binding_status)
-            )
-            stmt = stmt.where(Account.id.in_(status_subq))
-            total_stmt = total_stmt.where(Account.id.in_(status_subq))
+        stmt = stmt.where(Account.platform_binding_status == platform_binding_status)
+        total_stmt = total_stmt.where(Account.platform_binding_status == platform_binding_status)
     if classification_type:
         if classification_type == "unclassified":
             stmt = stmt.where(Account.classification_type.is_(None))

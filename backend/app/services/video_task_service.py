@@ -21,6 +21,7 @@ from app.models.account import Account
 
 from app.models.video_task import VideoSubTask, VideoTask
 from app.models.video_task_config import VideoTaskConfig
+from app.services.account_operation_guard import BLOCKED_ACCOUNT_STATUS_LABELS, is_account_operation_blocked
 from app.services.ext_product_service import enrich_shots_with_ext_products
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,12 @@ class VideoTaskService:
 
         normalized_shots = list(shots) if isinstance(shots, list) else []
         account = await self.db.get(Account, account_id)
+        if is_account_operation_blocked(account):
+            label = BLOCKED_ACCOUNT_STATUS_LABELS.get(account.platform_binding_status, account.platform_binding_status)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"账号状态不可操作：{label}",
+            )
         account_photo_url = account.photo_url if account else None
         if account_photo_url and (not account or account.face_mode != "no_face"):
             photo_shot = {

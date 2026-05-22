@@ -397,6 +397,7 @@ class AccountRead(BaseModel):
     channel_reservations: list[AccountChannelReservationRead] = []
     performance_snapshot: AccountPerformanceSnapshot | None = None
     hashtags: list[str] | None = None
+    platform_binding_status: str = "unbound"
     tiktok_bloggers: list[BoundBloggerRead] = []
     bound_tags: list[BoundTagRead] = []
     bound_flags: list[BoundFlagRead] = []
