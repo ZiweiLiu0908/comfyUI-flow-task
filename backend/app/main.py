@@ -29,6 +29,7 @@ from app.services.lark_notify_scheduler import start_lark_notify_scheduler, stop
 from app.services.channel_status_poller import start_channel_status_poller, stop_channel_status_poller
 from app.services.channel_name_sync_scheduler import start_channel_name_sync_scheduler, stop_channel_name_sync_scheduler
 from app.services.account_tier_scheduler import start_account_tier_scheduler, stop_account_tier_scheduler
+from app.services.account_shadowban_scheduler import start_account_shadowban_scheduler, stop_account_shadowban_scheduler
 from app.services.promotion_code_service import start_promotion_code_distributor, stop_promotion_code_distributor
 from app.services.topic_service import recover_stuck_keyword_gen_on_startup
 from app.services.video_source_service import recover_stuck_downloads_on_startup
@@ -120,6 +121,7 @@ async def startup_event() -> None:
     start_lark_notify_scheduler()
     start_channel_status_poller()
     start_channel_name_sync_scheduler()
+    start_account_shadowban_scheduler()
     start_account_tier_scheduler()
     await recover_stuck_keyword_gen_on_startup()
     await recover_stuck_templates_on_startup()
@@ -147,6 +149,7 @@ async def shutdown_event() -> None:
     await stop_lark_notify_scheduler()
     await stop_channel_status_poller()
     await stop_channel_name_sync_scheduler()
+    await stop_account_shadowban_scheduler()
     await stop_account_tier_scheduler()
     await stop_classification_queue_processor()
 

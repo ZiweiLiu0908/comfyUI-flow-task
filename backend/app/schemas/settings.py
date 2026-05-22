@@ -147,6 +147,9 @@ class PipelineSettingsPayload(BaseModel):
     tier_daily_formal_growth_max_rate: float = 0.06
     # 最近 N 条子任务的成功率公式里的 N
     sub_task_success_sample_size: int = 10
+    # Shadowban 判定规则
+    shadowban_video_sample_count: int = 7
+    shadowban_view_threshold: int = 0
     # 「有CTA」版本的 9 个 prompt
     outfit_select_prompt_cta: str = ""
     outfit_detail_prompt_cta: str = ""

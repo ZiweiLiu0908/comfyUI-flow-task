@@ -31,7 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.models.account import Account
 from app.models.external_supplement_request import ExternalSupplementRequest
+from app.services.account_operation_guard import BLOCKED_ACCOUNT_STATUSES
 
 logger = logging.getLogger("app.external_supplement_service")
 
@@ -65,6 +67,21 @@ async def _build_outbound_payload(
     from app.models.tiktok_blogger import TiktokBlogger
     from app.models.video_source import VideoSource
     from app.models.video_task import VideoTask
+
+    status_rows = (await session.execute(
+        select(Account.id, Account.platform_binding_status)
+        .where(Account.id.in_(account_ids))
+    )).all()
+    blocked_account_ids = {
+        aid for aid, platform_binding_status in status_rows
+        if platform_binding_status in BLOCKED_ACCOUNT_STATUSES
+    }
+    if blocked_account_ids:
+        logger.info(
+            "external_supplement: %d 个账号处于不可操作状态，跳过：%s",
+            len(blocked_account_ids),
+            [str(aid) for aid in list(blocked_account_ids)[:10]],
+        )
 
     # 1. 拉每个账号绑定的第一个博主（与原 candidate_service 口径一致）
     binding_rows = (await session.execute(
@@ -103,6 +120,9 @@ async def _build_outbound_payload(
     items: list[dict] = []
     skipped: list[str] = []
     for aid in account_ids:
+        if aid in blocked_account_ids:
+            skipped.append(str(aid))
+            continue
         bound = blogger_by_account.get(aid)
         if bound is None:
             skipped.append(str(aid))

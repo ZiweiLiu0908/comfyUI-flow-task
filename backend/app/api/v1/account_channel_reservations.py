@@ -19,6 +19,7 @@ from app.services.channel_status_poller import (
     query_channel_authorization,
     refresh_reservation_channel_status,
 )
+from app.services.account_service import recompute_account_platform_binding_status
 from app.services.kol_service import build_long_link, encode_short_link
 from app.schemas.account import (
     ExternalBindOpenAPIChannelBody,
@@ -212,6 +213,8 @@ async def reserve_ai_accounts_for_channel_openapi(
         )
 
     try:
+        for account in accounts:
+            await recompute_account_platform_binding_status(session, account.id)
         await session.commit()
     except IntegrityError:
         await session.rollback()
@@ -329,11 +332,13 @@ async def bind_openapi_channel_openapi(
         session.add(reservation)
         _apply_channel_binding(reservation, binding_payload, now=now)
         await refresh_reservation_channel_status(reservation)
+        await recompute_account_platform_binding_status(session, account_id)
         await session.commit()
     elif reservation.status != "bound":
         # 旧 reservation 但尚未 bound（reserved/confirmed），允许覆盖完成绑定
         _apply_channel_binding(reservation, binding_payload, now=now)
         await refresh_reservation_channel_status(reservation)
+        await recompute_account_platform_binding_status(session, account_id)
         await session.commit()
     # 已 bound：保持原值，直接返回当前数据
 
@@ -383,5 +388,7 @@ async def release_channel_reservation_openapi(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该平台的绑定记录")
 
     await session.delete(reservation)
+    await session.flush()
+    await recompute_account_platform_binding_status(session, body.account_id)
     await session.commit()
     return {"account_id": str(body.account_id), "platform": body.platform, "released": True}
