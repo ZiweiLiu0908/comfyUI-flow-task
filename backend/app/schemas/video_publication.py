@@ -45,6 +45,7 @@ class VideoPublicationRead(BaseModel):
     failed_channels: int
     channels_status: list[VideoPublicationChannelStatus] | None = None
     metrics_snapshot: "VideoPublicationMetricsSnapshot | None" = None
+    click_metrics_24h_snapshot: dict | None = None
     promotion_code: str | None = None
     ext_products: list | None = None
     error_message: str | None = None
@@ -134,6 +135,10 @@ class VideoPublicationStatsListItem(BaseModel):
     total_comments: int = 0
     total_shares: int = 0
     avg_view_percentage: float | None = None
+    clicks_24h: int | None = None
+    views_24h_snapshot: int | None = None
+    ctr_24h: float | None = None
+    click_metrics_status: str | None = None
     category_index: int | None = None
     category_label: str | None = None
     major_category: str | None = None

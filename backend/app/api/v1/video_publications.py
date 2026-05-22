@@ -439,7 +439,14 @@ async def sync_publication_metrics(
             async with SessionLocal() as bg_db:
                 service = VideoPublicationService(bg_db)
                 result = await service.sync_metrics_for_stats_page(query, owner_id=owner_id)
-                logger.info("sync-metrics background done: %s", result)
+                from app.services.publication_click_metrics_service import PublicationClickMetricsService
+
+                click_service = PublicationClickMetricsService(bg_db, open_api_client=service.open_api)
+                click_result = await click_service.sync_due_click_metrics(
+                    owner_id=owner_id,
+                    query=query,
+                )
+                logger.info("sync-metrics background done: metrics=%s click_metrics=%s", result, click_result)
         except Exception:
             logger.exception("sync-metrics background failed")
 

@@ -1866,6 +1866,11 @@ class VideoPublicationService:
     ) -> VideoPublicationStatsListItem:
         request_payload = publication.request_payload or {}
         metrics_snapshot = publication.metrics_snapshot if isinstance(publication.metrics_snapshot, dict) else None
+        click_metrics_snapshot = (
+            publication.click_metrics_24h_snapshot
+            if isinstance(publication.click_metrics_24h_snapshot, dict)
+            else None
+        )
         metrics_channels = []
         if metrics_snapshot:
             raw_channels = metrics_snapshot.get("channels") or []
@@ -1877,6 +1882,10 @@ class VideoPublicationService:
         total_comments = 0
         total_shares = 0
         view_percentage_values: list[float] = []
+        clicks_24h = None
+        views_24h_snapshot = None
+        ctr_24h = None
+        click_metrics_status = None
 
         for channel in metrics_channels:
             stats = channel.get("stats") or {}
@@ -1889,6 +1898,17 @@ class VideoPublicationService:
             avg_view_percentage = self._to_float(stats.get("average_view_percentage"))
             if avg_view_percentage is not None:
                 view_percentage_values.append(avg_view_percentage)
+
+        if click_metrics_snapshot:
+            click_metrics_status = str(click_metrics_snapshot.get("status") or "") or None
+            snapshot_clicks = click_metrics_snapshot.get("total_clicks_24h")
+            snapshot_views = click_metrics_snapshot.get("views_24h_snapshot")
+            snapshot_ctr = click_metrics_snapshot.get("ctr_24h")
+            if snapshot_clicks is not None:
+                clicks_24h = self._to_int(snapshot_clicks)
+            if snapshot_views is not None:
+                views_24h_snapshot = self._to_int(snapshot_views)
+            ctr_24h = self._to_float(snapshot_ctr)
 
         return VideoPublicationStatsListItem(
             id=publication.id,
@@ -1913,6 +1933,10 @@ class VideoPublicationService:
             total_comments=total_comments,
             total_shares=total_shares,
             avg_view_percentage=(sum(view_percentage_values) / len(view_percentage_values)) if view_percentage_values else None,
+            clicks_24h=clicks_24h,
+            views_24h_snapshot=views_24h_snapshot,
+            ctr_24h=ctr_24h,
+            click_metrics_status=click_metrics_status,
             category_index=getattr(classification, "category_index", None),
             category_label=_classification_label(classification),
             major_category=getattr(classification, "major_category", None),
@@ -1988,6 +2012,10 @@ class VideoPublicationService:
                 return item.total_comments
             if key_name == "total_shares":
                 return item.total_shares
+            if key_name == "clicks_24h":
+                return item.clicks_24h if item.clicks_24h is not None else -1
+            if key_name == "ctr_24h":
+                return item.ctr_24h if item.ctr_24h is not None else -1
             if key_name == "avg_view_percentage":
                 return item.avg_view_percentage if item.avg_view_percentage is not None else -1
             return item.published_at or item.created_at or datetime.min.replace(tzinfo=timezone.utc)

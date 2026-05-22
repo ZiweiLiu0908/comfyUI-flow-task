@@ -55,6 +55,8 @@ class VideoPublication(Base):
 
     # 发布后指标快照（由外部同步或人工写入）
     metrics_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 发布满 24h 后的点击/播放快照，用于统计页 CTR 固化
+    click_metrics_24h_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 格式: [
     #   {
     #     "platform": "youtube", "channel_id": "UCxxx", "channel_name": "...",

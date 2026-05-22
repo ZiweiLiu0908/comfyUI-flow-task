@@ -172,19 +172,19 @@
         </div>
         <div class="ps-stat-card">
           <div class="ps-stat-card-label">转化数（搜索次数）</div>
-          <div class="ps-stat-card-value ps-stat-card-empty">-</div>
+          <div class="ps-stat-card-value">{{ compactNumber(selectionStats.totalClicks24h) }}</div>
         </div>
         <div class="ps-stat-card">
           <div class="ps-stat-card-label">转化率</div>
-          <div class="ps-stat-card-value ps-stat-card-empty">-</div>
+          <div class="ps-stat-card-value">{{ formatPercent(selectionStats.totalCtr24h) }}</div>
         </div>
         <div class="ps-stat-card">
           <div class="ps-stat-card-label">平均转化数</div>
-          <div class="ps-stat-card-value ps-stat-card-empty">-</div>
+          <div class="ps-stat-card-value">{{ compactNumber(selectionStats.avgClicks24h) }}</div>
         </div>
         <div class="ps-stat-card">
           <div class="ps-stat-card-label">平均转化率</div>
-          <div class="ps-stat-card-value ps-stat-card-empty">-</div>
+          <div class="ps-stat-card-value">{{ formatPercent(selectionStats.avgCtr24h) }}</div>
         </div>
       </div>
     </div>
@@ -231,6 +231,12 @@
             </th>
             <th class="ps-th ps-th-num">
               <button class="ps-sort-btn" @click="toggleSort('avg_view_percentage')">平均观看比{{ sortMark('avg_view_percentage') }}</button>
+            </th>
+            <th class="ps-th ps-th-num">
+              <button class="ps-sort-btn" @click="toggleSort('clicks_24h')">24h点击{{ sortMark('clicks_24h') }}</button>
+            </th>
+            <th class="ps-th ps-th-num">
+              <button class="ps-sort-btn" @click="toggleSort('ctr_24h')">24h点击率{{ sortMark('ctr_24h') }}</button>
             </th>
           </tr>
         </thead>
@@ -292,6 +298,8 @@
             <td class="ps-td ps-td-num">{{ compactNumber(item.total_comments) }}</td>
             <td class="ps-td ps-td-num">{{ compactNumber(item.total_shares) }}</td>
             <td class="ps-td ps-td-num">{{ formatPercent(item.avg_view_percentage) }}</td>
+            <td class="ps-td ps-td-num">{{ compactNumber(item.clicks_24h) }}</td>
+            <td class="ps-td ps-td-num">{{ formatPercent(item.ctr_24h) }}</td>
           </tr>
         </tbody>
       </table>
@@ -369,6 +377,14 @@
         <div class="psd-summary-card">
           <div class="psd-card-label">平均观看比</div>
           <div class="psd-card-value">{{ formatPercent(activeItem.avg_view_percentage) }}</div>
+        </div>
+        <div class="psd-summary-card">
+          <div class="psd-card-label">24h 点击次数</div>
+          <div class="psd-card-value">{{ compactNumber(activeItem.clicks_24h) }}</div>
+        </div>
+        <div class="psd-summary-card">
+          <div class="psd-card-label">24h 点击率</div>
+          <div class="psd-card-value">{{ formatPercent(activeItem.ctr_24h) }}</div>
         </div>
       </div>
 
@@ -625,6 +641,12 @@ const selectionStats = computed(() => {
   // 点赞率：每条视频 likes/views 的平均（仅在 views > 0 时计入）
   let rateSum = 0
   let rateCount = 0
+  let totalClicks24h = 0
+  let totalClicksCount = 0
+  let ctrSum = 0
+  let ctrCount = 0
+  let weightedClickNumerator = 0
+  let weightedClickDenominator = 0
   for (const it of list) {
     const v = Number(it?.total_views)
     const l = Number(it?.total_likes)
@@ -633,12 +655,31 @@ const selectionStats = computed(() => {
     rateSum += (l / v) * 100
     rateCount += 1
   }
+  for (const it of list) {
+    const clicks = Number(it?.clicks_24h)
+    if (Number.isFinite(clicks) && clicks >= 0 && it?.clicks_24h != null) {
+      totalClicks24h += clicks
+      totalClicksCount += 1
+    }
+    const clickView = Number(it?.views_24h_snapshot)
+    if (Number.isFinite(clicks) && clicks >= 0 && Number.isFinite(clickView) && clickView > 0) {
+      const ctr = (clicks / clickView) * 100
+      ctrSum += ctr
+      ctrCount += 1
+      weightedClickNumerator += clicks
+      weightedClickDenominator += clickView
+    }
+  }
   return {
     avgViews: avg('total_views'),
     avgLikes: avg('total_likes'),
     avgComments: avg('total_comments'),
     avgShares: avg('total_shares'),
     avgLikeRate: rateCount > 0 ? rateSum / rateCount : null,
+    totalClicks24h: totalClicksCount > 0 ? totalClicks24h : null,
+    totalCtr24h: weightedClickDenominator > 0 ? (weightedClickNumerator / weightedClickDenominator) * 100 : null,
+    avgClicks24h: totalClicksCount > 0 ? totalClicks24h / totalClicksCount : null,
+    avgCtr24h: ctrCount > 0 ? ctrSum / ctrCount : null,
   }
 })
 

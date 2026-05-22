@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     kol_long_link_base_url: str = "https://www.alvinclub.ai/en-us/m/vibe"
     short_link_encode_api: str = "https://api.alvinclub.com/user-service/slk/encode/link"
     short_link_display_host: str = "https://alvc.me"
+    bigquery_project_id: str = "my-project-8584-jetonai"
+    publication_click_metrics_poll_interval_sec: int = 600
 
     # Google Gemini 官方 API（设置后优先使用，替代 REST API fallback）
     google_api_key: str = ""
