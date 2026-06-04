@@ -41,6 +41,10 @@ _task_deque: deque[uuid.UUID] = deque()
 _task_event: asyncio.Event | None = None   # 延迟初始化，须在 event loop 内创建
 _WORKER_COUNT = 3
 _workers: list[asyncio.Task] = []
+_failed_retry_scheduler_task: asyncio.Task | None = None
+_failed_retry_scheduler_stop_event: asyncio.Event | None = None
+_FAILED_RETRY_POLL_INTERVAL_SECONDS = 600.0
+_FAILED_RETRY_BATCH_SIZE = 20
 
 
 def _get_event() -> asyncio.Event:
@@ -102,6 +106,90 @@ async def stop_publish_meta_workers() -> None:
     logger.info("【AI预生成标题】所有 worker 已停止")
 
 
+def start_failed_publish_meta_retry_scheduler() -> None:
+    """启动失败标题自动补偿调度器。"""
+    global _failed_retry_scheduler_task, _failed_retry_scheduler_stop_event
+    if _failed_retry_scheduler_task is not None and not _failed_retry_scheduler_task.done():
+        return
+    _failed_retry_scheduler_stop_event = asyncio.Event()
+    _failed_retry_scheduler_task = asyncio.get_running_loop().create_task(
+        _failed_retry_scheduler_loop(_failed_retry_scheduler_stop_event)
+    )
+    logger.info(
+        "【AI标题失败补偿】调度器已启动，轮询间隔 %d 秒",
+        int(_FAILED_RETRY_POLL_INTERVAL_SECONDS),
+    )
+
+
+async def stop_failed_publish_meta_retry_scheduler() -> None:
+    """停止失败标题自动补偿调度器。"""
+    global _failed_retry_scheduler_task, _failed_retry_scheduler_stop_event
+    stop_event, worker = _failed_retry_scheduler_stop_event, _failed_retry_scheduler_task
+    _failed_retry_scheduler_stop_event = None
+    _failed_retry_scheduler_task = None
+    if stop_event is not None:
+        stop_event.set()
+    if worker is None:
+        return
+    worker.cancel()
+    try:
+        await worker
+    except asyncio.CancelledError:
+        pass
+    logger.info("【AI标题失败补偿】调度器已停止")
+
+
+async def _failed_retry_scheduler_loop(stop_event: asyncio.Event) -> None:
+    try:
+        while not stop_event.is_set():
+            try:
+                await retry_failed_publish_meta_once()
+            except Exception:
+                logger.exception("【AI标题失败补偿】轮询异常")
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=_FAILED_RETRY_POLL_INTERVAL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                continue
+    except asyncio.CancelledError:
+        raise
+
+
+async def retry_failed_publish_meta_once(limit: int = _FAILED_RETRY_BATCH_SIZE) -> dict[str, int]:
+    """扫描标题生成失败的 queued 子任务，用视频输入补偿生成发布元数据。"""
+    from sqlalchemy import select
+
+    async with SessionLocal() as session:
+        sub_task_ids = list((await session.execute(
+            select(VideoSubTask.id)
+            .where(VideoSubTask.status == "queued")
+            .where(VideoSubTask.publish_meta["status"].as_string() == "failed")
+            .order_by(VideoSubTask.updated_at.asc())
+            .limit(limit)
+        )).scalars().all())
+
+    if not sub_task_ids:
+        return {"total": 0, "processed": 0}
+
+    logger.info("【AI标题失败补偿】发现 %d 条失败标题任务，开始按视频补偿", len(sub_task_ids))
+    processed = 0
+    for sub_task_id in sub_task_ids:
+        try:
+            await _process_publish_meta(
+                sub_task_id,
+                input_mode="video",
+                fallback_to_default=True,
+            )
+            processed += 1
+        except Exception:
+            logger.exception("【AI标题失败补偿】处理子任务 %s 异常", sub_task_id)
+
+    logger.info("【AI标题失败补偿】本轮完成：processed=%d total=%d", processed, len(sub_task_ids))
+    return {"total": len(sub_task_ids), "processed": processed}
+
+
 # ── 配置加载 ───────────────────────────────────────────────────────────────────
 
 async def _load_auto_publish_config(owner_id: uuid.UUID | None) -> dict | None:
@@ -144,6 +232,19 @@ _PRODUCT_CODE_TITLE_LEGACY_SUFFIX = "Get my exact look here 👀 👇"
 _PRODUCT_CODE_TITLE_LEGACY_PREFIX = "👇 👀 Get my exact look here 👀 👇"
 # description 第一段引流文案
 _BIO_LINK_DESC_HEADER = "You can find this outfit through the link in my bio💗"
+_DEFAULT_TITLES = [
+    "How do you like this?",
+    "What do you think of this look?",
+    "A little moment worth sharing",
+    "This one caught my eye",
+]
+_DEFAULT_DESCRIPTION = "What do you think? Tell me in the comments."
+_DEFAULT_HASHTAGS = ["ootd", "style", "fashion", "outfitinspo"]
+_VIDEO_INPUT_PROMPT = (
+    "\n\nUse the attached video as the only content input. Analyze the visuals, scene, "
+    "people, action, styling, on-screen text, and overall mood, then generate publish "
+    "metadata for this video."
+)
 
 
 def _format_price_number(value: Any) -> str:
@@ -232,15 +333,86 @@ def _build_product_code_title(base_title: str) -> str:
     return f"{_PRODUCT_CODE_TITLE_PREFIX}{separator}{title_tail}".strip()[:100]
 
 
+def _build_default_publish_metadata(
+    *,
+    fallback_title: str,
+    promotion_code: str | None = None,
+    ext_products: list[dict] | None = None,
+) -> tuple[str, str, list[str]]:
+    base_title = (fallback_title or "").strip() or _DEFAULT_TITLES[0]
+    title = base_title[:100]
+    description = _DEFAULT_DESCRIPTION
+    if promotion_code:
+        title = _build_product_code_title(title)
+        description = _build_product_code_description(
+            description,
+            promotion_code,
+            ext_products or [],
+        )
+    return title, description, list(_DEFAULT_HASHTAGS)
+
+
+async def _write_default_publish_meta(
+    *,
+    sub_task_id: uuid.UUID,
+    fallback_title: str,
+    product_code_mode: str,
+    existing_promotion_code: str | None,
+    ext_products: list[dict],
+    fallback_reason: str,
+) -> None:
+    promotion_code = existing_promotion_code
+    promotion_code_acquired = False
+    if product_code_mode == "with_code" and not promotion_code:
+        promotion_code = await promotion_code_distributor.acquire()
+        promotion_code_acquired = True
+
+    title, description, hashtags = _build_default_publish_metadata(
+        fallback_title=fallback_title,
+        promotion_code=promotion_code,
+        ext_products=ext_products,
+    )
+    meta = {
+        "status": "done",
+        "title": title,
+        "description": description,
+        "hashtags": hashtags,
+        "fallback": True,
+        "fallback_reason": fallback_reason,
+    }
+    if promotion_code:
+        meta["promotion_code"] = promotion_code
+        meta["product_code_mode"] = product_code_mode
+        meta["ext_products_count"] = len(ext_products)
+
+    async with SessionLocal() as session:
+        sub = await session.get(VideoSubTask, sub_task_id)
+        if sub is None:
+            if promotion_code_acquired:
+                await promotion_code_distributor.discard(promotion_code)
+            return
+        sub.publish_meta = meta
+        try:
+            await session.commit()
+        except Exception:
+            if promotion_code_acquired:
+                await promotion_code_distributor.discard(promotion_code)
+            raise
+
+    if promotion_code_acquired:
+        await promotion_code_distributor.mark_committed(promotion_code)
+
+
 async def generate_publish_metadata(
     video_prompt: str,
     ai_config: dict,
     fallback_title: str,
     promotion_code: str | None = None,
     ext_products: list[dict] | None = None,
+    video_url: str | None = None,
 ) -> tuple[str, str, list[str]]:
     """
-    根据视频描述文本调用 Gemini API，生成 title/description/hashtags。
+    根据视频描述文本或视频 URL 调用 Gemini API，生成 title/description/hashtags。
     返回 (title, description, hashtags)。失败时有限重试。
     """
     from app.services.ai_api import call_gemini_api
@@ -268,6 +440,7 @@ async def generate_publish_metadata(
                     model_name=model_name,
                     prompt=prompt,
                     temperature=0.5,
+                    video_url=video_url,
                 )
                 logger.info("【AI预生成标题】原始响应（第%d次）：%s", attempt, raw[:500])
 
@@ -311,7 +484,12 @@ async def generate_publish_metadata(
     raise RuntimeError("AI 生成标题失败：主模型和备用模型均已耗尽重试次数")
 
 
-async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
+async def _process_publish_meta(
+    sub_task_id: uuid.UUID,
+    *,
+    input_mode: str = "prompt",
+    fallback_to_default: bool = False,
+) -> None:
     """worker 实际执行的处理逻辑：读取子任务 → 标记 generating → AI 生成 → 写回结果。"""
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
@@ -332,8 +510,13 @@ async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
             return
 
         video_prompt = (sub.task.prompt or "").strip()
+        video_url: str | None = None
+        if input_mode == "video":
+            from app.utils.gcs_signing import ensure_sub_task_signed_url
+            video_url = await ensure_sub_task_signed_url(session, sub)
+            video_prompt = _VIDEO_INPUT_PROMPT
         owner_id = sub.task.owner_id
-        fallback_title = video_prompt[:100] or "视频"
+        fallback_title = (_DEFAULT_TITLES[0] if input_mode == "video" else video_prompt[:100]) or _DEFAULT_TITLES[0]
         ext_products = build_ext_products_from_shots(sub.task.shots)
         account: Account | None = None
         if sub.task.account_id:
@@ -348,8 +531,19 @@ async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
         ):
             existing_promotion_code = None
 
-    if not video_prompt:
-        logger.info("【AI预生成标题】子任务 %s 的 task.prompt 为空，跳过", sub_task_id)
+    if not video_prompt or (input_mode == "video" and not video_url):
+        missing_reason = "result_video_url 为空" if input_mode == "video" else "task.prompt 为空"
+        logger.info("【AI预生成标题】子任务 %s 的 %s，跳过", sub_task_id, missing_reason)
+        if fallback_to_default:
+            await _write_default_publish_meta(
+                sub_task_id=sub_task_id,
+                fallback_title=fallback_title,
+                product_code_mode=product_code_mode,
+                existing_promotion_code=existing_promotion_code,
+                ext_products=ext_products,
+                fallback_reason="missing_input",
+            )
+            return
         async with SessionLocal() as session:
             sub = await session.get(VideoSubTask, sub_task_id)
             if sub is not None:
@@ -361,6 +555,15 @@ async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
     ai_config = await _load_auto_publish_config(owner_id)
     if ai_config is None:
         logger.info("【AI预生成标题】子任务 %s owner 未启用 AI 生成标题，跳过", sub_task_id)
+        if fallback_to_default:
+            await _write_default_publish_meta(
+                sub_task_id=sub_task_id,
+                fallback_title=fallback_title,
+                product_code_mode=product_code_mode,
+                existing_promotion_code=existing_promotion_code,
+                ext_products=ext_products,
+                fallback_reason="missing_ai_config",
+            )
         return
 
     promotion_code: str | None = None
@@ -395,7 +598,10 @@ async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
     if promotion_code_acquired:
         await promotion_code_distributor.mark_committed(promotion_code)
 
-    logger.info("【AI预生成标题】子任务 %s 开始生成标题，prompt 前50字: %s", sub_task_id, video_prompt[:50])
+    logger.info(
+        "【AI预生成标题】子任务 %s 开始生成标题，input_mode=%s prompt 前50字: %s",
+        sub_task_id, input_mode, video_prompt[:50],
+    )
 
     # 4. 调用 AI 生成
     try:
@@ -405,6 +611,7 @@ async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
             fallback_title=fallback_title,
             promotion_code=promotion_code,
             ext_products=ext_products,
+            video_url=video_url,
         )
         meta = {
             "status": "done",
@@ -419,6 +626,20 @@ async def _process_publish_meta(sub_task_id: uuid.UUID) -> None:
     except Exception as e:
         logger.error("【AI预生成标题】子任务 %s 生成失败：%s", sub_task_id, e)
         meta = {"status": "failed"}
+        if fallback_to_default:
+            title, description, hashtags = _build_default_publish_metadata(
+                fallback_title=fallback_title,
+                promotion_code=promotion_code,
+                ext_products=ext_products,
+            )
+            meta = {
+                "status": "done",
+                "title": title,
+                "description": description,
+                "hashtags": hashtags,
+                "fallback": True,
+                "fallback_reason": "ai_failed",
+            }
         if promotion_code:
             meta["promotion_code"] = promotion_code
             meta["product_code_mode"] = product_code_mode

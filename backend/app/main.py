@@ -44,7 +44,9 @@ from app.services.video_classification_service import (
 )
 from app.services.publish_meta_service import (
     recover_stuck_publish_meta_on_startup,
+    start_failed_publish_meta_retry_scheduler,
     start_publish_meta_workers,
+    stop_failed_publish_meta_retry_scheduler,
     stop_publish_meta_workers,
 )
 from app.services.persona_tagging_queue_service import (
@@ -140,6 +142,7 @@ async def startup_event() -> None:
     await recover_classification_on_startup()
     await start_publish_meta_workers()
     await recover_stuck_publish_meta_on_startup()
+    start_failed_publish_meta_retry_scheduler()
     start_persona_tagging_workers()
     await recover_stuck_tagging_on_startup()
 
@@ -156,6 +159,7 @@ async def shutdown_event() -> None:
     await stop_candidate_scheduler()
     await stop_template_supplement_scheduler()
     await stop_scheduled_generation_scheduler()
+    await stop_failed_publish_meta_retry_scheduler()
     await stop_publish_meta_workers()
     await stop_lark_notify_scheduler()
     await stop_channel_status_poller()

@@ -617,7 +617,7 @@ async def regenerate_publish_meta(
     owner_id: uuid.UUID | None = Depends(_get_query_owner_id),
     session: AsyncSession = Depends(get_db),
 ) -> Any:
-    """重新触发 AI 预生成发布标题（仅限 queued 状态）"""
+    """重新触发 AI 预生成发布标题（仅限 queued 状态，使用视频输入并失败兜底）"""
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     from app.models.video_task import VideoSubTask, VideoTask
@@ -645,7 +645,13 @@ async def regenerate_publish_meta(
     await session.refresh(sub)
 
     from app.services.publish_meta_service import _process_publish_meta
-    asyncio.create_task(_process_publish_meta(sub.id))
+    asyncio.create_task(
+        _process_publish_meta(
+            sub.id,
+            input_mode="video",
+            fallback_to_default=True,
+        )
+    )
 
     from app.utils.gcs_signing import serialize_sub_task
     return await serialize_sub_task(session, sub)
