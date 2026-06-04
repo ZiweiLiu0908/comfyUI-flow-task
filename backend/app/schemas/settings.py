@@ -30,6 +30,17 @@ class TemplateSupplementConfigPayload(BaseModel):
     template_supplement_max_rounds: int = 2
 
 
+class ScheduledGenerationConfigPayload(BaseModel):
+    scheduled_generation_enabled: bool = False
+    scheduled_generation_cron: str | None = "0 10 * * *"
+    scheduled_generation_lookback_days: int = 2
+    scheduled_generation_target_unpublished_count: int = 5
+    scheduled_generation_subtask_count: int = 1
+    scheduled_generation_unused_template_months: int = 3
+    scheduled_generation_used_template_cooldown_days: int = 30
+    scheduled_generation_category_rules: dict = Field(default_factory=dict)
+
+
 class CandidateSearchPayload(BaseModel):
     keyword_text: str
     keyword_id: str | None = None  # UUID 字符串，可选（手动输入时为空）

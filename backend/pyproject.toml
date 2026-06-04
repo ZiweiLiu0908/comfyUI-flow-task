@@ -29,4 +29,5 @@ dependencies = [
   "volcengine-python-sdk[ark]>=5.0.21",
   "apify-client>=1.12.2",
   "openpyxl>=3.1.0",
+  "aiosqlite>=0.20.0",
 ]

@@ -24,6 +24,7 @@ from app.models.formal_video_backfill import FormalVideoBackfill
 from app.models.external_supplement_request import ExternalSupplementRequest
 from app.models.external_supplement_request_item import ExternalSupplementRequestItem
 from app.models.template_supplement_run import TemplateSupplementRun
+from app.models.scheduled_generation_run import ScheduledGenerationRun, ScheduledGenerationRunItem
 
 __all__ = [
     "VideoSource", "VideoSourceStat", "VideoAITemplate", "Account",
@@ -44,4 +45,5 @@ __all__ = [
     "ExternalSupplementRequest",
     "ExternalSupplementRequestItem",
     "TemplateSupplementRun",
+    "ScheduledGenerationRun", "ScheduledGenerationRunItem",
 ]
