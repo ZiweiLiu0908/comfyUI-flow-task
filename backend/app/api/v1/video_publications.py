@@ -444,7 +444,7 @@ async def sync_publication_metrics(
             logger.exception("sync-metrics background failed")
 
     background_tasks.add_task(_run)
-ti    return {"total": total, "message": f"后台同步 {total} 条视频数据中"}
+    return {"total": total, "message": f"后台同步 {total} 条视频数据中"}
 
 
 @router.post("/video-publications/sync-kol-clicks")
