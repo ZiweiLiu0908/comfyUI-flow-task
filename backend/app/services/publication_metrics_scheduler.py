@@ -495,7 +495,7 @@ async def collect_kol_link_clicks(
             )
             pub.kol_link_clicks = clicks
             updated += 1
-            logger.debug(
+            logger.info(
                 "【KOL点击收集】publication_id=%s kol_user_id=%s eastern_day=%s clicks=%d",
                 pub.id, kol_user_id, eastern_day, clicks,
             )

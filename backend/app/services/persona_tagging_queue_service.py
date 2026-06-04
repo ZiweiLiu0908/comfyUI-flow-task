@@ -173,13 +173,13 @@ async def _run_video_task(task_id: uuid.UUID) -> None:
             if not video_url:
                 raise RuntimeError("no usable video URL (local_gcs_video_url / local_video_url both empty)")
 
-            logger.info(
+            logger.debug(
                 "[video_tagging] start task_id=%s video_id=%s url=%.80s",
                 task_id, task.video_id, video_url,
             )
 
             # 阶段1：生成描述单元（需要视频内容）
-            logger.info("[video_tagging] stage1/description_unit task_id=%s", task_id)
+            logger.debug("[video_tagging] stage1/description_unit task_id=%s", task_id)
             unit_result = await analyze_video_description_unit(
                 video_url=video_url,
                 gcs_url=video_url,
@@ -191,10 +191,10 @@ async def _run_video_task(task_id: uuid.UUID) -> None:
             if unit_result.get("error"):
                 raise RuntimeError(f"video_description_unit: {unit_result['error']}")
             unit = unit_result.get("parsed") or {}
-            logger.info("[video_tagging] stage1 done task_id=%s", task_id)
+            logger.debug("[video_tagging] stage1 done task_id=%s", task_id)
 
             # 阶段3：10 属性分类（纯文本，用描述单元）
-            logger.info("[video_tagging] stage3/classification task_id=%s", task_id)
+            logger.debug("[video_tagging] stage3/classification task_id=%s", task_id)
             classification_result = await analyze_video_classification(
                 video_url=video_url,
                 caption=caption,
@@ -205,10 +205,10 @@ async def _run_video_task(task_id: uuid.UUID) -> None:
             if classification_result.get("error"):
                 raise RuntimeError(f"personal_tags: {classification_result['error']}")
             personal_tags = classification_result.get("parsed") or {}
-            logger.info("[video_tagging] stage3 done task_id=%s", task_id)
+            logger.debug("[video_tagging] stage3 done task_id=%s", task_id)
 
             # 阶段4：32 维风格向量
-            logger.info("[video_tagging] stage4/style_vector task_id=%s", task_id)
+            logger.debug("[video_tagging] stage4/style_vector task_id=%s", task_id)
             style_vector_result = await analyze_video_style_vector(
                 video_url=video_url,
                 caption=caption,
@@ -219,10 +219,10 @@ async def _run_video_task(task_id: uuid.UUID) -> None:
             if style_vector_result.get("error"):
                 raise RuntimeError(f"style_vector: {style_vector_result['error']}")
             style_vector = style_vector_result.get("parsed") or {}
-            logger.info("[video_tagging] stage4 done task_id=%s", task_id)
+            logger.debug("[video_tagging] stage4 done task_id=%s", task_id)
 
             # 阶段5：风格签名
-            logger.info("[video_tagging] stage5/style_signature task_id=%s", task_id)
+            logger.debug("[video_tagging] stage5/style_signature task_id=%s", task_id)
             style_signature_result = await analyze_video_style_signature(
                 video_url=video_url,
                 caption=caption,
@@ -234,7 +234,7 @@ async def _run_video_task(task_id: uuid.UUID) -> None:
             if style_signature_result.get("error"):
                 raise RuntimeError(f"style_signature: {style_signature_result['error']}")
             style_signature = style_signature_result.get("parsed") or {}
-            logger.info("[video_tagging] stage5 done task_id=%s", task_id)
+            logger.debug("[video_tagging] stage5 done task_id=%s", task_id)
 
             now = datetime.now(timezone.utc)
             task.status = "success"
@@ -263,7 +263,7 @@ async def _run_video_task(task_id: uuid.UUID) -> None:
                 vs.tagging_status = "success"
                 vs.updated_at = now
 
-            logger.info("Video tagging success: task_id=%s video_id=%s", task_id, task.video_id)
+            logger.debug("Video tagging success: task_id=%s video_id=%s", task_id, task.video_id)
 
         except Exception as exc:
             logger.exception("Video tagging failed: task_id=%s err=%s", task_id, exc)
@@ -390,7 +390,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
             tiktok_blogger_id = task.tiktok_blogger_id
             min_count = task.min_video_count or 15
 
-            logger.info(
+            logger.debug(
                 "[blogger_tagging] start task_id=%s blogger_id=%s min_video_count=%d",
                 task_id, tiktok_blogger_id, min_count,
             )
@@ -408,7 +408,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
             available = len(videos)
             now = datetime.now(timezone.utc)
 
-            logger.info(
+            logger.debug(
                 "[blogger_tagging] videos available=%d required=%d task_id=%s",
                 available, min_count, task_id,
             )
@@ -441,7 +441,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
             existing_by_video = {str(t.video_id): t for t in existing_result.scalars().all()}
 
             success_tasks = [t for t in existing_by_video.values() if t.status == "success"]
-            logger.info(
+            logger.debug(
                 "[blogger_tagging] video_tasks success=%d/%d task_id=%s",
                 len(success_tasks), min_count, task_id,
             )
@@ -467,7 +467,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
                     )
                     video_task_ids.append(vt.id)
 
-                logger.info(
+                logger.debug(
                     "[blogger_tagging] submitted %d video tasks, waiting... task_id=%s",
                     len(video_task_ids), task_id,
                 )
@@ -487,7 +487,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
                 return
 
             # 已有足够成功视频，开始聚合
-            logger.info("[blogger_tagging] aggregating task_id=%s selected=%d", task_id, min_count)
+            logger.debug("[blogger_tagging] aggregating task_id=%s selected=%d", task_id, min_count)
             task.status = "aggregating"
             task.result_message = "aggregating blogger result"
             task.successful_video_count = len(success_tasks)
@@ -573,7 +573,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
 
             # 先 commit 博主任务本身，确保 success 状态落库
             await db.commit()
-            logger.info("Blogger tagging success: task_id=%s blogger_id=%s", task_id, tiktok_blogger_id)
+            logger.debug("Blogger tagging success: task_id=%s blogger_id=%s", task_id, tiktok_blogger_id)
 
             # 写回 tiktok_bloggers 表（独立 commit，失败不影响任务状态）
             try:
@@ -589,7 +589,7 @@ async def _run_blogger_task(task_id: uuid.UUID) -> None:
                     blogger_obj.tagging_status = "success"
                     blogger_obj.updated_at = now
                     await db.commit()
-                    logger.info("Blogger tagging written back to tiktok_bloggers: blogger_id=%s", tiktok_blogger_id)
+                    logger.debug("Blogger tagging written back to tiktok_bloggers: blogger_id=%s", tiktok_blogger_id)
             except Exception as wb_exc:
                 logger.error(
                     "Blogger tagging writeback failed (task already success): blogger_id=%s err=%s",
@@ -725,11 +725,11 @@ async def enqueue_blogger_tagging(
 
     if existing and existing.status == "success":
         if blogger.persona_tags is not None:
-            logger.info("enqueue_blogger_tagging: already success, skip %s", tiktok_blogger_id)
+            logger.debug("enqueue_blogger_tagging: already success, skip %s", tiktok_blogger_id)
             return existing
         # blogger_tagging_results 已有结果，直接补写 tiktok_bloggers，不必重跑
         if existing.account_personal_tags is not None:
-            logger.info(
+            logger.debug(
                 "enqueue_blogger_tagging: writeback only (task success, persona_tags missing) %s",
                 tiktok_blogger_id,
             )
@@ -740,12 +740,12 @@ async def enqueue_blogger_tagging(
             blogger.tagging_status = "success"
             blogger.updated_at = datetime.now(timezone.utc)
             return existing  # 调用方会 commit
-        logger.info(
+        logger.debug(
             "enqueue_blogger_tagging: status=success but no data, re-enqueue %s",
             tiktok_blogger_id,
         )
     elif existing and existing.status in ("pending", "checking_videos", "waiting_videos", "aggregating"):
-        logger.info("enqueue_blogger_tagging: already running (%s), skip %s", existing.status, tiktok_blogger_id)
+        logger.debug("enqueue_blogger_tagging: already running (%s), skip %s", existing.status, tiktok_blogger_id)
         return existing
 
     blogger.tagging_status = "pending"
@@ -782,7 +782,7 @@ async def enqueue_blogger_tagging(
         )
         db.add(task)
 
-    logger.info(
+    logger.debug(
         "enqueue_blogger_tagging: queued blogger_id=%s available_videos=%d",
         tiktok_blogger_id, available,
     )
