@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.schemas.settings import (
     CandidateConfigPayload,
     PipelineSettingsPayload,
+    ScheduledGenerationConfigPayload,
     TemplateSupplementConfigPayload,
 )
 from app.schemas.topic import KeywordGenConfigPayload
@@ -218,6 +219,57 @@ async def put_pipeline_settings(
 ) -> PipelineSettingsPayload:
     row = await update_pipeline_settings(session, owner_id=token.user_id, payload=payload)
     return PipelineSettingsPayload.model_validate(row, from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# 定时一键生成配置（per-user）
+# ---------------------------------------------------------------------------
+
+@router.get("/scheduled-generation-config", response_model=ScheduledGenerationConfigPayload)
+async def get_scheduled_generation_config(
+    token: TokenData = Depends(require_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ScheduledGenerationConfigPayload:
+    row = await get_or_create_pipeline_settings(session, owner_id=token.user_id)
+    return ScheduledGenerationConfigPayload(
+        scheduled_generation_enabled=row.scheduled_generation_enabled,
+        scheduled_generation_cron=row.scheduled_generation_cron or "0 10 * * *",
+        scheduled_generation_lookback_days=row.scheduled_generation_lookback_days or 2,
+        scheduled_generation_target_unpublished_count=row.scheduled_generation_target_unpublished_count or 5,
+        scheduled_generation_subtask_count=row.scheduled_generation_subtask_count or 1,
+        scheduled_generation_unused_template_months=row.scheduled_generation_unused_template_months or 3,
+        scheduled_generation_used_template_cooldown_days=row.scheduled_generation_used_template_cooldown_days or 30,
+        scheduled_generation_category_rules=row.scheduled_generation_category_rules or {},
+    )
+
+
+@router.put("/scheduled-generation-config", response_model=ScheduledGenerationConfigPayload)
+async def put_scheduled_generation_config(
+    payload: ScheduledGenerationConfigPayload,
+    token: TokenData = Depends(require_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> ScheduledGenerationConfigPayload:
+    row = await get_or_create_pipeline_settings(session, owner_id=token.user_id)
+    row.scheduled_generation_enabled = bool(payload.scheduled_generation_enabled)
+    row.scheduled_generation_cron = payload.scheduled_generation_cron or "0 10 * * *"
+    row.scheduled_generation_lookback_days = max(int(payload.scheduled_generation_lookback_days or 2), 1)
+    row.scheduled_generation_target_unpublished_count = max(int(payload.scheduled_generation_target_unpublished_count or 5), 1)
+    row.scheduled_generation_subtask_count = max(int(payload.scheduled_generation_subtask_count or 1), 1)
+    row.scheduled_generation_unused_template_months = max(int(payload.scheduled_generation_unused_template_months or 3), 1)
+    row.scheduled_generation_used_template_cooldown_days = max(int(payload.scheduled_generation_used_template_cooldown_days or 30), 1)
+    row.scheduled_generation_category_rules = payload.scheduled_generation_category_rules or {}
+    await session.commit()
+    await session.refresh(row)
+    return ScheduledGenerationConfigPayload(
+        scheduled_generation_enabled=row.scheduled_generation_enabled,
+        scheduled_generation_cron=row.scheduled_generation_cron,
+        scheduled_generation_lookback_days=row.scheduled_generation_lookback_days,
+        scheduled_generation_target_unpublished_count=row.scheduled_generation_target_unpublished_count,
+        scheduled_generation_subtask_count=row.scheduled_generation_subtask_count,
+        scheduled_generation_unused_template_months=row.scheduled_generation_unused_template_months,
+        scheduled_generation_used_template_cooldown_days=row.scheduled_generation_used_template_cooldown_days,
+        scheduled_generation_category_rules=row.scheduled_generation_category_rules or {},
+    )
 
 
 # ---------------------------------------------------------------------------

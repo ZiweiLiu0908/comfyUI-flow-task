@@ -23,6 +23,10 @@
           <svg v-if="!bulkVideoGenerating" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:6px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           {{ bulkVideoGenerating ? `${bulkVideoGenProgress.current}/${bulkVideoGenProgress.total}` : selectedMap.size > 0 ? `一键生成 (${selectedMap.size})` : '一键生成' }}
         </el-button>
+        <el-button class="al-schedule-btn" :disabled="total === 0" @click="openScheduledGenerationDialog">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 12h4"/></svg>
+          定时生成
+        </el-button>
         <el-button class="al-schedule-btn" :disabled="total === 0" @click="openBulkScheduleDialog">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           {{ selectedMap.size > 0 ? `一键定时 (${selectedMap.size})` : '一键定时' }}
@@ -604,6 +608,94 @@
       <template #footer>
         <el-button @click="showBulkGenDialog = false">取消</el-button>
         <el-button type="primary" :loading="bulkVideoGenerating" @click="startBulkVideoGenerate">开始生成</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 定时一键生成配置 dialog -->
+    <el-dialog
+      v-model="showScheduledGenerationDialog"
+      title="定时一键生成"
+      width="620px"
+      :close-on-click-modal="false"
+    >
+      <div class="al-supplement-body">
+        <div class="al-supplement-scope">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>仅处理已绑定 TikTok 博主的 AI 博主</span>
+        </div>
+        <div class="al-supplement-config">
+          <div class="al-supplement-config-row" style="justify-content:space-between">
+            <div class="al-supplement-config-label">启用定时生成</div>
+            <el-switch v-model="scheduledGenerationForm.enabled" />
+          </div>
+        </div>
+        <template v-if="scheduledGenerationForm.enabled">
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">北京时间 Cron</div>
+            <div class="al-schedule-presets" style="margin-bottom:8px">
+              <button
+                v-for="preset in scheduledGenerationPresets"
+                :key="preset.cron"
+                type="button"
+                :class="{ active: scheduledGenerationForm.cron === preset.cron }"
+                @click="scheduledGenerationForm.cron = preset.cron"
+              >
+                {{ preset.label }}
+              </button>
+            </div>
+            <el-input v-model="scheduledGenerationForm.cron" placeholder="0 10 * * *" style="font-family:monospace" />
+          </div>
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">库存与筛选</div>
+            <div class="al-supplement-filters">
+              <div class="al-supplement-filter-row">
+                <label>查找 N 天前</label>
+                <el-input-number v-model="scheduledGenerationForm.lookbackDays" :min="1" :max="30" controls-position="right" style="width:160px" />
+              </div>
+              <div class="al-supplement-filter-row">
+                <label>目标未发布库存</label>
+                <el-input-number v-model="scheduledGenerationForm.targetUnpublishedCount" :min="1" :max="99" controls-position="right" style="width:160px" />
+              </div>
+              <div class="al-supplement-filter-row">
+                <label>每任务视频数</label>
+                <el-input-number v-model="scheduledGenerationForm.subtaskCount" :min="1" :max="20" controls-position="right" style="width:160px" />
+              </div>
+              <div class="al-supplement-filter-row">
+                <label>未使用回看（月）</label>
+                <el-input-number v-model="scheduledGenerationForm.unusedTemplateMonths" :min="1" :max="24" controls-position="right" style="width:160px" />
+              </div>
+              <div class="al-supplement-filter-row">
+                <label>已使用冷却（天）</label>
+                <el-input-number v-model="scheduledGenerationForm.usedTemplateCooldownDays" :min="0" :max="365" controls-position="right" style="width:160px" />
+              </div>
+            </div>
+          </div>
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">大类重提规则</div>
+            <div class="al-scheduled-rule-list">
+              <div v-for="major in RANKABLE_MAJOR_KEYS" :key="major" class="al-scheduled-rule-row">
+                <div class="al-scheduled-rule-name">
+                  <span :class="`al-supplement-major-dot is-${major}`"></span>
+                  <span>{{ MAJOR_LABEL_MAP[major] }}</span>
+                </div>
+                <el-switch v-model="scheduledGenerationForm.categoryRules[major].enabled" />
+                <div class="al-scheduled-rule-field">
+                  <span>播放量 &gt;</span>
+                  <el-input-number v-model="scheduledGenerationForm.categoryRules[major].min_views" :min="0" :step="1000" controls-position="right" style="width:140px" />
+                </div>
+                <div class="al-scheduled-rule-field">
+                  <span>重提</span>
+                  <el-input-number v-model="scheduledGenerationForm.categoryRules[major].repeat_count" :min="1" :max="20" controls-position="right" style="width:110px" />
+                  <span>次</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="showScheduledGenerationDialog = false">取消</el-button>
+        <el-button type="primary" :loading="scheduledGenerationSaving" @click="saveScheduledGenerationConfig">保存</el-button>
       </template>
     </el-dialog>
 
@@ -2264,7 +2356,7 @@ import { fetchFlags, createFlag, updateFlag, deleteFlag, bulkBindFlags, bulkUnbi
 import { fetchBloggerTaggingProgress, submitBloggerTagging } from '../api/persona_tagging'
 import { syncAccountSnapshots } from '../api/video_publications'
 import { isDuplicateRequestError } from '../api/http'
-import { fetchPipelineSettings, updatePipelineSettings, fetchTemplateSupplementConfig, updateTemplateSupplementConfig } from '../api/settings'
+import { fetchPipelineSettings, updatePipelineSettings, fetchTemplateSupplementConfig, updateTemplateSupplementConfig, fetchScheduledGenerationConfig, updateScheduledGenerationConfig } from '../api/settings'
 import { downloadLatestPublishedVideos } from '../api/video_tasks'
 
 const route = useRoute()
@@ -3902,6 +3994,37 @@ const supplementScheduleForm = ref({
   categoryKeys: [],
   maxRounds: 2,
 })
+const scheduledGenerationPresets = [
+  { label: '每天10点', cron: '0 10 * * *' },
+  { label: '每天18点', cron: '0 18 * * *' },
+  { label: '每6小时', cron: '0 */6 * * *' },
+]
+const scheduledGenerationMajorKeys = ['beauty', 'method', 'shopping', 'lifestyle', 'drama']
+const showScheduledGenerationDialog = ref(false)
+const scheduledGenerationSaving = ref(false)
+
+function buildScheduledGenerationRules(raw = {}) {
+  return scheduledGenerationMajorKeys.reduce((acc, major) => {
+    const item = raw?.[major] || {}
+    acc[major] = {
+      enabled: Boolean(item.enabled),
+      min_views: Number(item.min_views ?? 5000),
+      repeat_count: Number(item.repeat_count ?? 3),
+    }
+    return acc
+  }, {})
+}
+
+const scheduledGenerationForm = ref({
+  enabled: false,
+  cron: '0 10 * * *',
+  lookbackDays: 2,
+  targetUnpublishedCount: 5,
+  subtaskCount: 1,
+  unusedTemplateMonths: 3,
+  usedTemplateCooldownDays: 30,
+  categoryRules: buildScheduledGenerationRules(),
+})
 
 function openSupplementDialog() {
   supplementForm.value = {
@@ -4026,6 +4149,48 @@ async function saveSupplementSchedule() {
     ElMessage.error(err?.response?.data?.detail || '保存定时补充配置失败')
   } finally {
     supplementScheduleSaving.value = false
+  }
+}
+
+async function openScheduledGenerationDialog() {
+  try {
+    const data = await fetchScheduledGenerationConfig()
+    scheduledGenerationForm.value = {
+      enabled: data.scheduled_generation_enabled ?? false,
+      cron: data.scheduled_generation_cron || '0 10 * * *',
+      lookbackDays: data.scheduled_generation_lookback_days || 2,
+      targetUnpublishedCount: data.scheduled_generation_target_unpublished_count || 5,
+      subtaskCount: data.scheduled_generation_subtask_count || 1,
+      unusedTemplateMonths: data.scheduled_generation_unused_template_months || 3,
+      usedTemplateCooldownDays: data.scheduled_generation_used_template_cooldown_days ?? 30,
+      categoryRules: buildScheduledGenerationRules(data.scheduled_generation_category_rules || {}),
+    }
+    showScheduledGenerationDialog.value = true
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '加载定时生成配置失败')
+  }
+}
+
+async function saveScheduledGenerationConfig() {
+  if (scheduledGenerationSaving.value) return
+  scheduledGenerationSaving.value = true
+  try {
+    await updateScheduledGenerationConfig({
+      scheduled_generation_enabled: scheduledGenerationForm.value.enabled,
+      scheduled_generation_cron: scheduledGenerationForm.value.cron || '0 10 * * *',
+      scheduled_generation_lookback_days: scheduledGenerationForm.value.lookbackDays || 2,
+      scheduled_generation_target_unpublished_count: scheduledGenerationForm.value.targetUnpublishedCount || 5,
+      scheduled_generation_subtask_count: scheduledGenerationForm.value.subtaskCount || 1,
+      scheduled_generation_unused_template_months: scheduledGenerationForm.value.unusedTemplateMonths || 3,
+      scheduled_generation_used_template_cooldown_days: scheduledGenerationForm.value.usedTemplateCooldownDays ?? 30,
+      scheduled_generation_category_rules: scheduledGenerationForm.value.categoryRules,
+    })
+    showScheduledGenerationDialog.value = false
+    ElMessage.success(scheduledGenerationForm.value.enabled ? '定时生成已启用' : '定时生成已关闭')
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '保存定时生成配置失败')
+  } finally {
+    scheduledGenerationSaving.value = false
   }
 }
 
@@ -6492,6 +6657,28 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 8px;
 }
+.al-schedule-presets button {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.al-schedule-presets button:hover {
+  border-color: #6366f1;
+  color: #6366f1;
+  background: #eef2ff;
+}
+.al-schedule-presets button.active {
+  border-color: #6366f1;
+  background: #6366f1;
+  color: #fff;
+  font-weight: 600;
+}
 .al-preset-btn {
   font-size: 13px;
   font-weight: 500;
@@ -6856,6 +7043,54 @@ onMounted(() => {
 .al-supplement-major-dot.is-knowledge { background: #3b82f6; }
 .al-supplement-major-dot.is-persona { background: #f59e0b; }
 .al-supplement-major-dot.is-trending { background: #10b981; }
+.al-supplement-major-dot.is-beauty { background: #ec4899; }
+.al-supplement-major-dot.is-method { background: #3b82f6; }
+.al-supplement-major-dot.is-shopping { background: #f59e0b; }
+.al-supplement-major-dot.is-lifestyle { background: #10b981; }
+.al-supplement-major-dot.is-drama { background: #8b5cf6; }
+.al-supplement-major-dot.is-unclassifiable { background: #94a3b8; }
+
+.al-scheduled-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.al-scheduled-rule-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) 56px minmax(190px, 220px) minmax(150px, 170px);
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+}
+
+.al-scheduled-rule-name,
+.al-scheduled-rule-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.al-scheduled-rule-name {
+  font-weight: 600;
+  color: #334155;
+}
+
+.al-scheduled-rule-field span {
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .al-scheduled-rule-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: flex-start;
+  }
+}
 
 .al-supplement-types {
   display: grid;

@@ -31,6 +31,16 @@ export async function updateTemplateSupplementConfig(payload) {
   return data
 }
 
+export async function fetchScheduledGenerationConfig() {
+  const { data } = await http.get('/settings/scheduled-generation-config')
+  return data
+}
+
+export async function updateScheduledGenerationConfig(payload) {
+  const { data } = await http.put('/settings/scheduled-generation-config', payload)
+  return data
+}
+
 export async function triggerCheckChannelStatus() {
   const { data } = await http.post('/settings/check-channel-status')
   return data

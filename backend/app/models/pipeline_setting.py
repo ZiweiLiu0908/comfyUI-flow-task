@@ -137,6 +137,16 @@ class PipelineSetting(Base):
     template_supplement_filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     template_supplement_max_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     template_supplement_last_trigger_key: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 定时一键生成（北京时间 cron）
+    scheduled_generation_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    scheduled_generation_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    scheduled_generation_lookback_days: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    scheduled_generation_target_unpublished_count: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    scheduled_generation_subtask_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    scheduled_generation_unused_template_months: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    scheduled_generation_used_template_cooldown_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    scheduled_generation_category_rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    scheduled_generation_last_trigger_key: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # 人脸选择配置
     face_select_model: Mapped[str] = mapped_column(String(200), nullable=False, default="gemini-3.1-pro-preview")
     face_select_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
