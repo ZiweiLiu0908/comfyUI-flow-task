@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 
 import pytz
 
@@ -30,6 +30,30 @@ _scheduler_stop_event: asyncio.Event | None = None
 
 # 上次执行时间记录，key: "sync_metrics" | "sync_account_snapshot"
 _last_run: dict[str, str] = {}
+
+
+def eastern_date_range_to_utc(date_from, date_to) -> tuple[datetime | None, datetime | None]:
+    """把美东自然日范围转换为 UTC 起止时间。
+
+    date_from/date_to 是 America/New_York 口径下的日期；completed_at 仍按 UTC 存储。
+    """
+    start = None
+    end = None
+    if date_from is not None:
+        start = _EASTERN_TZ.localize(
+            datetime.combine(date_from, datetime.min.time())
+        ).astimezone(timezone.utc)
+    if date_to is not None:
+        next_day = date_to + timedelta(days=1)
+        end = _EASTERN_TZ.localize(
+            datetime.combine(next_day, datetime.min.time())
+        ).astimezone(timezone.utc)
+    return start, end
+
+
+def today_eastern_date() -> date_type:
+    """返回 America/New_York 当前自然日。"""
+    return datetime.now(_EASTERN_TZ).date()
 
 
 def start_publication_metrics_scheduler() -> None:
@@ -410,7 +434,6 @@ async def collect_kol_link_clicks(
     publication_id: 若传入则只处理该条记录（用于手动触发单条补采）。
     force: 为 True 时会重算并覆盖已有 kol_link_clicks。
     """
-    from datetime import date as date_type
     from sqlalchemy import select
     from app.models.account import Account
     from app.models.video_publication import VideoPublication
@@ -441,17 +464,11 @@ async def collect_kol_link_clicks(
         stmt = stmt.where(VideoTask.owner_id == owner_id)
     if account_id is not None:
         stmt = stmt.where(VideoTask.account_id == account_id)
-    if date_from is not None:
-        stmt = stmt.where(
-            VideoPublication.completed_at
-            >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
-        )
-    if date_to is not None:
-        next_day = date_type.fromordinal(date_to.toordinal() + 1)
-        stmt = stmt.where(
-            VideoPublication.completed_at
-            < datetime.combine(next_day, datetime.min.time(), tzinfo=timezone.utc)
-        )
+    date_start_utc, date_end_utc = eastern_date_range_to_utc(date_from, date_to)
+    if date_start_utc is not None:
+        stmt = stmt.where(VideoPublication.completed_at >= date_start_utc)
+    if date_end_utc is not None:
+        stmt = stmt.where(VideoPublication.completed_at < date_end_utc)
     rows = (await db.execute(stmt)).all()
     if platform:
         platform_lower = str(platform).lower()

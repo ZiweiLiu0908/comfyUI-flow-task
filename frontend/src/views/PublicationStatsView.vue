@@ -998,14 +998,11 @@ async function handleSyncKolClicks() {
   if (syncingKolClicks.value) return
   syncingKolClicks.value = true
   try {
-    const todayUtc = formatYmd(new Date())
     const result = await syncKolLinkClicks({
       platform: filters.platform || undefined,
       account_id: filters.account_id || undefined,
-      date_from: todayUtc,
-      date_to: todayUtc,
     })
-    ElMessage.success(result.message || '今日 Link 点击同步任务已提交')
+    ElMessage.success(result.message || '美东今日 Link 点击同步任务已提交')
     await load()
   } catch (e) {
     ElMessage.error(e?.response?.data?.detail || 'Link 点击同步失败，请稍后重试')

@@ -459,21 +459,24 @@ async def sync_kol_link_clicks(
 ):
     """按美东自然日后台重算 KOL Link 点击数。
 
-    不传 date_from/date_to 时，只处理 UTC 当天发布的视频，避免按钮误扫历史数据。
+    不传 date_from/date_to 时，只处理美东当天发布的视频，避免按钮误扫历史数据。
     """
     from sqlalchemy import select, func
     from app.db.session import SessionLocal
     from app.models.account import Account
     from app.models.video_publication import VideoPublication
     from app.models.video_task import VideoSubTask, VideoTask
-    from app.services.publication_metrics_scheduler import collect_kol_link_clicks
+    from app.services.publication_metrics_scheduler import (
+        collect_kol_link_clicks,
+        eastern_date_range_to_utc,
+        today_eastern_date,
+    )
 
     owner_id = None if current_user.is_admin else current_user.user_id
     if date_from is None and date_to is None:
-        from datetime import datetime, timezone
-        today_utc = datetime.now(timezone.utc).date()
-        date_from = today_utc
-        date_to = today_utc
+        today_eastern = today_eastern_date()
+        date_from = today_eastern
+        date_to = today_eastern
 
     stmt = (
         select(func.count())
@@ -489,17 +492,11 @@ async def sync_kol_link_clicks(
         stmt = stmt.where(VideoTask.owner_id == owner_id)
     if account_id is not None:
         stmt = stmt.where(VideoTask.account_id == account_id)
-    if date_from is not None:
-        from datetime import datetime, timezone
-        stmt = stmt.where(
-            VideoPublication.completed_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
-        )
-    if date_to is not None:
-        from datetime import datetime, timezone
-        next_day = date.fromordinal(date_to.toordinal() + 1)
-        stmt = stmt.where(
-            VideoPublication.completed_at < datetime.combine(next_day, datetime.min.time(), tzinfo=timezone.utc)
-        )
+    date_start_utc, date_end_utc = eastern_date_range_to_utc(date_from, date_to)
+    if date_start_utc is not None:
+        stmt = stmt.where(VideoPublication.completed_at >= date_start_utc)
+    if date_end_utc is not None:
+        stmt = stmt.where(VideoPublication.completed_at < date_end_utc)
     total = (await db.execute(stmt)).scalar() or 0
 
     async def _run():
