@@ -85,6 +85,32 @@ _INSERT_MISSING_SQL = text(
         CAST(:owner_id AS uuid) IS NULL
         OR COALESCE(tpl.owner_id, vs.owner_id) = CAST(:owner_id AS uuid)
       )
+      AND (
+        :binding_filter_mode = 'none'
+        OR (
+          :binding_filter_mode = 'auto'
+          AND EXISTS (
+            SELECT 1
+            FROM video_classifications vc
+            WHERE vc.video_source_id = tpl.video_source_id
+              AND vc.status = 'success'
+              AND vc.major_category = ANY(CAST(:allowed_major_keys AS text[]))
+          )
+        )
+        OR (
+          :binding_filter_mode = 'category'
+          AND EXISTS (
+            SELECT 1
+            FROM video_classifications vc
+            WHERE vc.video_source_id = tpl.video_source_id
+              AND vc.status = 'success'
+              AND (
+                vc.category_key = ANY(CAST(:category_keys AS text[]))
+                OR vc.major_category = ANY(CAST(:category_keys AS text[]))
+              )
+          )
+        )
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM video_source_tags vst
@@ -129,6 +155,19 @@ _POOL_COUNTS_SQL = text(
             )
         )
       )
+      AND (
+        :use_category_filter = false
+        OR EXISTS (
+          SELECT 1
+          FROM video_classifications vc
+          WHERE vc.video_source_id = tt.video_source_id
+            AND vc.status = 'success'
+            AND (
+              vc.category_key = ANY(CAST(:category_keys AS text[]))
+              OR vc.major_category = ANY(CAST(:category_keys AS text[]))
+            )
+        )
+      )
     )
     SELECT
       COUNT(*) AS matched_templates,
@@ -169,23 +208,40 @@ async def ensure_account_template_tags(
     session: AsyncSession,
     account_id: uuid.UUID,
     owner_id: uuid.UUID | None = None,
+    *,
+    bind_mode: str = "default",
+    category_keys: list[str] | None = None,
 ) -> AccountTemplateTagSyncResult:
     account = await session.get(Account, account_id)
     if account is None:
         raise ValueError("account not found")
 
     effective_owner_id = owner_id if owner_id is not None else account.owner_id
-    params = {"account_id": account_id, "owner_id": effective_owner_id}
+    allowed_indices, allowed_major_keys = _classification_filters(account)
+    normalized_category_keys = list(dict.fromkeys(category_keys or []))
+    if bind_mode == "auto":
+        binding_filter_mode = "auto"
+    elif normalized_category_keys:
+        binding_filter_mode = "category"
+    else:
+        binding_filter_mode = "none"
+    params = {
+        "account_id": account_id,
+        "owner_id": effective_owner_id,
+        "binding_filter_mode": binding_filter_mode,
+        "allowed_major_keys": allowed_major_keys,
+        "category_keys": normalized_category_keys,
+    }
     before = (await session.execute(_SYNC_STATS_SQL, params)).first()
 
     inserted = (await session.execute(_INSERT_MISSING_SQL, params)).all()
 
-    allowed_indices, allowed_major_keys = _classification_filters(account)
     pool = (await session.execute(_POOL_COUNTS_SQL, {
         **params,
         "use_classification_filter": bool(allowed_indices or allowed_major_keys),
         "allowed_indices": allowed_indices,
         "allowed_major_keys": allowed_major_keys,
+        "use_category_filter": bool(normalized_category_keys),
     })).first()
 
     return AccountTemplateTagSyncResult(

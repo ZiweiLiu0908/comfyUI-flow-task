@@ -43,6 +43,8 @@ def resolve_item_status(
 def item_status_payload(item: ExternalSupplementRequestItem) -> dict[str, Any]:
     target = int(item.target_video_count or 0)
     completed = int(item.completed_count or 0)
+    target_unused = item.target_unused_template_count
+    current_unused = item.current_unused_template_count
     return {
         "request_id": str(item.request_id),
         "account_id": str(item.account_id),
@@ -51,6 +53,20 @@ def item_status_payload(item: ExternalSupplementRequestItem) -> dict[str, Any]:
         "target_count": target,
         "completed_count": completed,
         "remaining_count": max(target - completed, 0),
+        "target_unused_template_count": int(target_unused) if target_unused is not None else target,
+        "initial_unused_template_count": (
+            int(item.initial_unused_template_count)
+            if item.initial_unused_template_count is not None
+            else None
+        ),
+        "current_unused_template_count": int(current_unused) if current_unused is not None else None,
+        "requested_video_count": (
+            int(item.requested_video_count)
+            if item.requested_video_count is not None
+            else target
+        ),
+        "round_index": int(item.round_index or 1),
+        "schedule_run_id": str(item.schedule_run_id) if item.schedule_run_id else None,
         "failed_count": int(item.failed_count or 0),
         "rejected_count": int(item.rejected_count or 0),
         "duplicated_count": int(item.duplicated_count or 0),
@@ -69,10 +85,13 @@ async def create_request_items(
     target_video_count: int,
     payload_items: list[dict],
     skipped_account_ids: list[str],
+    item_context_by_account: dict[str, dict[str, Any]] | None = None,
 ) -> None:
+    item_context_by_account = item_context_by_account or {}
     for item in payload_items:
         account_id = uuid.UUID(str(item["account_id"]))
         blogger = item.get("blogger") or {}
+        ctx = item_context_by_account.get(str(account_id), {})
         session.add(ExternalSupplementRequestItem(
             request_id=request_id,
             owner_id=owner_id,
@@ -80,15 +99,36 @@ async def create_request_items(
             mode=mode,
             blogger_handle=blogger.get("handle"),
             target_video_count=target_video_count,
+            target_unused_template_count=ctx.get("target_unused_template_count"),
+            initial_unused_template_count=ctx.get("initial_unused_template_count"),
+            current_unused_template_count=ctx.get("current_unused_template_count"),
+            requested_video_count=ctx.get("requested_video_count", target_video_count),
+            round_index=int(ctx.get("round_index") or 1),
+            schedule_run_id=(
+                uuid.UUID(str(ctx["schedule_run_id"]))
+                if ctx.get("schedule_run_id")
+                else None
+            ),
             status="running",
         ))
     for aid in skipped_account_ids:
+        ctx = item_context_by_account.get(str(aid), {})
         session.add(ExternalSupplementRequestItem(
             request_id=request_id,
             owner_id=owner_id,
             account_id=uuid.UUID(str(aid)),
             mode=mode,
             target_video_count=target_video_count,
+            target_unused_template_count=ctx.get("target_unused_template_count"),
+            initial_unused_template_count=ctx.get("initial_unused_template_count"),
+            current_unused_template_count=ctx.get("current_unused_template_count"),
+            requested_video_count=ctx.get("requested_video_count", target_video_count),
+            round_index=int(ctx.get("round_index") or 1),
+            schedule_run_id=(
+                uuid.UUID(str(ctx["schedule_run_id"]))
+                if ctx.get("schedule_run_id")
+                else None
+            ),
             status="skipped",
             error_message="无绑定博主 handle",
             final_received=True,
@@ -132,12 +172,15 @@ async def mark_video_completed(
     *,
     request_id: uuid.UUID,
     account_id: uuid.UUID,
+    current_unused_template_count: int | None = None,
 ) -> None:
     item = await _get_item_for_update(session, request_id, account_id)
     if item is None:
         return
     item.completed_count = int(item.completed_count or 0) + 1
     item.processing_count = max(0, int(item.processing_count or 0) - 1)
+    if current_unused_template_count is not None:
+        item.current_unused_template_count = int(current_unused_template_count)
     item.status = resolve_item_status(
         target_count=int(item.target_video_count or 0),
         completed_count=int(item.completed_count or 0),
@@ -155,6 +198,7 @@ async def mark_video_failed(
     reason: str,
     rejected: bool = False,
     decrement_processing: bool = True,
+    current_unused_template_count: int | None = None,
 ) -> None:
     item = await _get_item_for_update(session, request_id, account_id)
     if item is None:
@@ -164,6 +208,8 @@ async def mark_video_failed(
         item.rejected_count = int(item.rejected_count or 0) + 1
     if decrement_processing:
         item.processing_count = max(0, int(item.processing_count or 0) - 1)
+    if current_unused_template_count is not None:
+        item.current_unused_template_count = int(current_unused_template_count)
     item.error_message = reason
     item.status = resolve_item_status(
         target_count=int(item.target_video_count or 0),

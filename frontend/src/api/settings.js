@@ -21,6 +21,16 @@ export async function updatePipelineSettings(payload) {
   return data
 }
 
+export async function fetchTemplateSupplementConfig() {
+  const { data } = await http.get('/settings/template-supplement-config')
+  return data
+}
+
+export async function updateTemplateSupplementConfig(payload) {
+  const { data } = await http.put('/settings/template-supplement-config', payload)
+  return data
+}
+
 export async function triggerCheckChannelStatus() {
   const { data } = await http.post('/settings/check-channel-status')
   return data

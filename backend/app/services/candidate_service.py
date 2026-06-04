@@ -41,13 +41,22 @@ async def _sync_account_template_tags_before_supplement(
     account_id: uuid.UUID,
     owner_id: uuid.UUID | None,
     context: str,
+    *,
+    bind_mode: str = "default",
+    category_keys: list[str] | None = None,
 ) -> None:
     from app.db.session import SessionLocal
     from app.services.account_template_tag_service import ensure_account_template_tags
 
     try:
         async with SessionLocal() as session:
-            result = await ensure_account_template_tags(session, account_id, owner_id=owner_id)
+            result = await ensure_account_template_tags(
+                session,
+                account_id,
+                owner_id=owner_id,
+                bind_mode=bind_mode,
+                category_keys=category_keys,
+            )
             if result.newly_bound > 0:
                 await session.commit()
             logger.info(
@@ -1948,7 +1957,12 @@ async def auto_supplement_for_account(
          → 类别匹配才写 video_source + 建模板；不匹配直接丢弃，零 DB 记录。
     - single: 只允许 Top1 大类；dual: 允许 Top1 + Top2 大类
     """
-    await _sync_account_template_tags_before_supplement(account_id, owner_id, "自动补充")
+    await _sync_account_template_tags_before_supplement(
+        account_id,
+        owner_id,
+        "自动补充",
+        bind_mode="auto",
+    )
 
     from app.db.session import SessionLocal
     from app.models.account import Account
@@ -2192,7 +2206,7 @@ async def auto_supplement_for_account(
                 )
             )
             imported += 1
-            logger.info("【自动补充】[%d/%d] 分类=%s 导入成功 %s", imported, max_new_videos, major, video_url)
+            logger.info("【自动补充】[%d/%d] 分类=%s 导入成功 %s", imported, max_new_videos, category_key, video_url)
 
         except Exception as exc:
             logger.warning("【自动补充】处理失败，继续下一个 video_url=%s: %s", video_url, exc)

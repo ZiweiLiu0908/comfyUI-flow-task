@@ -1661,6 +1661,7 @@ class SupplementTemplatesBody(BaseModel):
     account_list_filters: AccountListFilters | None = None  # account_ids 为空时后端自查全量
     template_type: str = "shared"  # "shared" | "exclusive"
     # 新版字段 + 兼容旧前端
+    target_unused_template_count: int | None = None
     target_video_count: int | None = None
     max_new_videos: int | None = None
     filters: SupplementFiltersBody | None = None
@@ -2177,9 +2178,13 @@ async def _resolve_account_ids(
     return []
 
 
-def _resolve_target_count(body: SupplementTemplatesBody | "AutoSupplementBody") -> int:
-    """新字段 target_video_count 优先，没传 fallback 到旧字段 max_new_videos，再没有默认 10。"""
-    n = getattr(body, "target_video_count", None) or getattr(body, "max_new_videos", None)
+def _resolve_target_unused_count(body: SupplementTemplatesBody | "AutoSupplementBody") -> int:
+    """target_unused_template_count 优先；兼容旧 target_video_count / max_new_videos。"""
+    n = (
+        getattr(body, "target_unused_template_count", None)
+        or getattr(body, "target_video_count", None)
+        or getattr(body, "max_new_videos", None)
+    )
     return int(n) if n and int(n) > 0 else 10
 
 
@@ -2209,7 +2214,7 @@ async def supplement_templates(
         return {"message": "无账号，跳过", "count": 0}
 
     template_type = body.template_type if body.template_type in ("shared", "exclusive") else "shared"
-    target_count = _resolve_target_count(body)
+    target_count = _resolve_target_unused_count(body)
     effective_owner = owner_id if owner_id is not None else creator_id
     filters_dict = body.filters.model_dump(mode="json", exclude_none=True) if body.filters else {}
     if body.filters and body.filters.category_keys is not None:
@@ -2222,46 +2227,93 @@ async def supplement_templates(
         else:
             filters_dict.pop("category_keys", None)
 
+    from app.services.template_supplement_service import build_account_top_up_plan
+
+    plans = []
+    for account_id in account_ids:
+        plan = await build_account_top_up_plan(
+            session,
+            account_id=account_id,
+            owner_id=effective_owner,
+            mode="exclusive" if template_type == "exclusive" else "shared",
+            target_unused_template_count=target_count,
+            filters=filters_dict,
+        )
+        plans.append(plan)
+    await session.commit()
+    need_plans = [p for p in plans if p.need_count > 0 and not p.skip_reason]
+    skipped_accounts = len(plans) - len(need_plans)
+    if not need_plans:
+        return {
+            "message": f"所有账号都已达到目标未使用模板数或不可补充，跳过 {skipped_accounts} 个",
+            "count": 0,
+            "skipped_accounts": skipped_accounts,
+        }
+
     # exclusive 模式：只走 vendor，失败/未配置直接报错
     if template_type == "exclusive":
         if not _vendor_configured():
             raise HTTPException(status_code=503, detail="vendor 未配置（VENDOR_SUPPLEMENT_API_URL / API_KEY）")
+        grouped: dict[int, list[uuid.UUID]] = {}
+        for plan in need_plans:
+            grouped.setdefault(plan.need_count, []).append(plan.account_id)
+        request_ids: list[str] = []
+        submitted_items = 0
         try:
-            result = await submit_supplement_request(
-                owner_id=effective_owner,
-                account_ids=account_ids,
-                mode="exclusive",
-                target_video_count=target_count,
-                filters=filters_dict,
-            )
+            for need_count, grouped_account_ids in grouped.items():
+                context_by_account = {
+                    str(plan.account_id): {
+                        "target_unused_template_count": target_count,
+                        "initial_unused_template_count": plan.current_unused_template_count,
+                        "current_unused_template_count": plan.current_unused_template_count,
+                        "requested_video_count": need_count,
+                        "round_index": 1,
+                    }
+                    for plan in need_plans
+                    if plan.need_count == need_count
+                }
+                result = await submit_supplement_request(
+                    owner_id=effective_owner,
+                    account_ids=grouped_account_ids,
+                    mode="exclusive",
+                    target_video_count=need_count,
+                    filters=filters_dict,
+                    item_context_by_account=context_by_account,
+                )
+                request_ids.append(result["request_id"])
+                submitted_items += result["submitted_items"]
         except Exception as exc:
             logger.error("vendor outbound 失败: %s", exc)
             raise HTTPException(status_code=502, detail=f"vendor outbound 失败: {exc}")
         return {
-            "message": f"已委托 vendor 为 {result['submitted_items']} 个账号补充模板",
-            "count": result["submitted_items"],
-            "skipped_accounts": result["skipped_accounts"],
-            "request_id": result["request_id"],
+            "message": f"已按目标未使用模板数为 {submitted_items} 个账号补充模板，跳过 {skipped_accounts} 个",
+            "count": submitted_items,
+            "skipped_accounts": skipped_accounts,
+            "request_ids": request_ids,
         }
 
     # shared 模式：内部 candidate_service
-    _asyncio.create_task(
-        supplement_templates_for_accounts(
-            account_ids=account_ids,
-            owner_id=effective_owner,
-            template_type=template_type,
-            max_new_videos=target_count,
-        )
-    )
+    async def _run_shared_top_up() -> None:
+        for plan in need_plans:
+            await supplement_templates_for_accounts(
+                account_ids=[plan.account_id],
+                owner_id=effective_owner,
+                template_type=template_type,
+                max_new_videos=plan.need_count,
+            )
+
+    _asyncio.create_task(_run_shared_top_up())
     return {
-        "message": f"已为 {len(account_ids)} 个账号启动共享补充模板任务（内部路径）",
-        "count": len(account_ids),
+        "message": f"已按目标未使用模板数为 {len(need_plans)} 个账号启动共享补充，跳过 {skipped_accounts} 个",
+        "count": len(need_plans),
+        "skipped_accounts": skipped_accounts,
     }
 
 
 class AutoSupplementBody(BaseModel):
     account_ids: list[uuid.UUID] = Field(default_factory=list)
     account_list_filters: AccountListFilters | None = None  # account_ids 为空时后端自查全量
+    target_unused_template_count: int | None = None
     target_video_count: int | None = None
     max_new_videos: int | None = None
     filters: SupplementFiltersBody | None = None
@@ -2288,28 +2340,69 @@ async def auto_supplement_templates(
     if not account_ids:
         return {"message": "无账号，跳过", "count": 0}
 
-    target_count = _resolve_target_count(body)
+    target_count = _resolve_target_unused_count(body)
     effective_owner = owner_id if owner_id is not None else creator_id
     filters_dict = body.filters.model_dump(mode="json", exclude_none=True) if body.filters else {}
+    from app.services.template_supplement_service import build_account_top_up_plan
+    plans = []
+    for account_id in account_ids:
+        plan = await build_account_top_up_plan(
+            session,
+            account_id=account_id,
+            owner_id=effective_owner,
+            mode="auto",
+            target_unused_template_count=target_count,
+            filters=filters_dict,
+        )
+        plans.append(plan)
+    await session.commit()
+    need_plans = [p for p in plans if p.need_count > 0 and not p.skip_reason]
+    skipped_accounts = len(plans) - len(need_plans)
+    if not need_plans:
+        return {
+            "message": f"所有账号都已达到目标未使用模板数或不可自动补充，跳过 {skipped_accounts} 个",
+            "count": 0,
+            "skipped_accounts": skipped_accounts,
+        }
 
     if not _vendor_configured():
         raise HTTPException(status_code=503, detail="vendor 未配置（VENDOR_SUPPLEMENT_API_URL / API_KEY）")
+    grouped: dict[int, list[uuid.UUID]] = {}
+    for plan in need_plans:
+        grouped.setdefault(plan.need_count, []).append(plan.account_id)
+    request_ids: list[str] = []
+    submitted_items = 0
     try:
-        result = await submit_supplement_request(
-            owner_id=effective_owner,
-            account_ids=account_ids,
-            mode="auto",
-            target_video_count=target_count,
-            filters=filters_dict,
-        )
+        for need_count, grouped_account_ids in grouped.items():
+            context_by_account = {
+                str(plan.account_id): {
+                    "target_unused_template_count": target_count,
+                    "initial_unused_template_count": plan.current_unused_template_count,
+                    "current_unused_template_count": plan.current_unused_template_count,
+                    "requested_video_count": need_count,
+                    "round_index": 1,
+                }
+                for plan in need_plans
+                if plan.need_count == need_count
+            }
+            result = await submit_supplement_request(
+                owner_id=effective_owner,
+                account_ids=grouped_account_ids,
+                mode="auto",
+                target_video_count=need_count,
+                filters=filters_dict,
+                item_context_by_account=context_by_account,
+            )
+            request_ids.append(result["request_id"])
+            submitted_items += result["submitted_items"]
     except Exception as exc:
         logger.error("vendor outbound 失败: %s", exc)
         raise HTTPException(status_code=502, detail=f"vendor outbound 失败: {exc}")
     return {
-        "message": f"已委托 vendor 为 {result['submitted_items']} 个账号自动补充",
-        "count": result["submitted_items"],
-        "skipped_accounts": result["skipped_accounts"],
-        "request_id": result["request_id"],
+        "message": f"已按目标未使用模板数为 {submitted_items} 个账号自动补充，跳过 {skipped_accounts} 个",
+        "count": submitted_items,
+        "skipped_accounts": skipped_accounts,
+        "request_ids": request_ids,
     }
 
 

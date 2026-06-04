@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CandidateConfigPayload(BaseModel):
@@ -20,6 +20,14 @@ class CandidateConfigPayload(BaseModel):
     candidate_schedule_enabled: bool = False
     candidate_schedule_cron: str | None = None
     candidate_search_interval_minutes: int = 0
+
+
+class TemplateSupplementConfigPayload(BaseModel):
+    template_supplement_schedule_enabled: bool = False
+    template_supplement_schedule_cron: str | None = "0 10 * * *"
+    template_supplement_target_unused_count: int = 10
+    template_supplement_filters: dict = Field(default_factory=dict)
+    template_supplement_max_rounds: int = 2
 
 
 class CandidateSearchPayload(BaseModel):

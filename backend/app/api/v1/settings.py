@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.schemas.settings import (
     CandidateConfigPayload,
     PipelineSettingsPayload,
+    TemplateSupplementConfigPayload,
 )
 from app.schemas.topic import KeywordGenConfigPayload
 from app.services.channel_status_poller import run_channel_status_check
@@ -320,4 +321,46 @@ async def put_candidate_config(
         candidate_ai_review_prompt=row.candidate_ai_review_prompt,
         candidate_schedule_enabled=row.candidate_schedule_enabled,
         candidate_schedule_cron=row.candidate_schedule_cron,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 模板定时补充配置（per-user）
+# ---------------------------------------------------------------------------
+
+@router.get("/template-supplement-config", response_model=TemplateSupplementConfigPayload)
+async def get_template_supplement_config(
+    token: TokenData = Depends(require_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> TemplateSupplementConfigPayload:
+    row = await get_or_create_pipeline_settings(session, owner_id=token.user_id)
+    return TemplateSupplementConfigPayload(
+        template_supplement_schedule_enabled=row.template_supplement_schedule_enabled,
+        template_supplement_schedule_cron=row.template_supplement_schedule_cron or "0 10 * * *",
+        template_supplement_target_unused_count=row.template_supplement_target_unused_count or 10,
+        template_supplement_filters=row.template_supplement_filters or {},
+        template_supplement_max_rounds=row.template_supplement_max_rounds or 2,
+    )
+
+
+@router.put("/template-supplement-config", response_model=TemplateSupplementConfigPayload)
+async def put_template_supplement_config(
+    payload: TemplateSupplementConfigPayload,
+    token: TokenData = Depends(require_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> TemplateSupplementConfigPayload:
+    row = await get_or_create_pipeline_settings(session, owner_id=token.user_id)
+    row.template_supplement_schedule_enabled = bool(payload.template_supplement_schedule_enabled)
+    row.template_supplement_schedule_cron = payload.template_supplement_schedule_cron or "0 10 * * *"
+    row.template_supplement_target_unused_count = max(int(payload.template_supplement_target_unused_count or 10), 1)
+    row.template_supplement_filters = payload.template_supplement_filters or {}
+    row.template_supplement_max_rounds = max(int(payload.template_supplement_max_rounds or 2), 1)
+    await session.commit()
+    await session.refresh(row)
+    return TemplateSupplementConfigPayload(
+        template_supplement_schedule_enabled=row.template_supplement_schedule_enabled,
+        template_supplement_schedule_cron=row.template_supplement_schedule_cron,
+        template_supplement_target_unused_count=row.template_supplement_target_unused_count,
+        template_supplement_filters=row.template_supplement_filters or {},
+        template_supplement_max_rounds=row.template_supplement_max_rounds,
     )

@@ -402,6 +402,12 @@ class SupplementStatusRead(BaseModel):
     target_count: int = 0
     completed_count: int = 0
     remaining_count: int = 0
+    target_unused_template_count: int = 0
+    initial_unused_template_count: int | None = None
+    current_unused_template_count: int | None = None
+    requested_video_count: int = 0
+    round_index: int = 1
+    schedule_run_id: str | None = None
     failed_count: int = 0
     rejected_count: int = 0
     duplicated_count: int = 0

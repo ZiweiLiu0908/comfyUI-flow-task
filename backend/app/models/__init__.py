@@ -23,6 +23,7 @@ from app.models.video_classification import VideoClassification
 from app.models.formal_video_backfill import FormalVideoBackfill
 from app.models.external_supplement_request import ExternalSupplementRequest
 from app.models.external_supplement_request_item import ExternalSupplementRequestItem
+from app.models.template_supplement_run import TemplateSupplementRun
 
 __all__ = [
     "VideoSource", "VideoSourceStat", "VideoAITemplate", "Account",
@@ -42,4 +43,5 @@ __all__ = [
     "FormalVideoBackfill",
     "ExternalSupplementRequest",
     "ExternalSupplementRequestItem",
+    "TemplateSupplementRun",
 ]

@@ -31,6 +31,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:6px"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           {{ selectedMap.size > 0 ? `补充模板 (${selectedMap.size})` : '补充模板' }}
         </el-button>
+        <el-button class="al-supplement-btn" :disabled="total === 0" @click="openSupplementScheduleDialog">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          定时补充
+        </el-button>
         <el-button class="al-namehandle-btn" :loading="bulkNameHandleLoading" :disabled="total === 0" @click="confirmBulkNameHandle">
           <svg v-if="!bulkNameHandleLoading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:6px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           {{ selectedMap.size > 0 ? `生成Handle (${selectedMap.size})` : '生成Handle' }}
@@ -691,12 +695,12 @@
         </div>
         <!-- 数量配置 -->
         <div class="al-supplement-config">
-          <div class="al-supplement-config-label">目标视频数量（每个博主）</div>
+          <div class="al-supplement-config-label">目标未使用模板数量（每个博主）</div>
           <div class="al-supplement-config-row">
-            <button class="al-supplement-minus" @click="supplementForm.targetVideoCount = Math.max(1, supplementForm.targetVideoCount - 1)">−</button>
-            <span class="al-supplement-num">{{ supplementForm.targetVideoCount }}</span>
-            <button class="al-supplement-plus" @click="supplementForm.targetVideoCount = Math.min(50, supplementForm.targetVideoCount + 1)">+</button>
-            <span class="al-supplement-num-hint">条</span>
+            <button class="al-supplement-minus" @click="supplementForm.targetUnusedTemplateCount = Math.max(1, supplementForm.targetUnusedTemplateCount - 1)">−</button>
+            <span class="al-supplement-num">{{ supplementForm.targetUnusedTemplateCount }}</span>
+            <button class="al-supplement-plus" @click="supplementForm.targetUnusedTemplateCount = Math.min(50, supplementForm.targetUnusedTemplateCount + 1)">+</button>
+            <span class="al-supplement-num-hint">个</span>
           </div>
         </div>
 
@@ -745,6 +749,103 @@
       <template #footer>
         <el-button @click="showSupplementDialog = false">取消</el-button>
         <el-button type="primary" :loading="supplementing" @click="handleSupplement">开始补充</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 定时补充模板弹窗 -->
+    <el-dialog
+      v-model="showSupplementScheduleDialog"
+      title="定时补充模板"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <div class="al-supplement-body">
+        <div class="al-supplement-scope">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>仅处理已绑定 TikTok 博主的 AI 博主</span>
+        </div>
+        <div class="al-supplement-config">
+          <div class="al-supplement-config-row" style="justify-content:space-between">
+            <div class="al-supplement-config-label">启用定时补充</div>
+            <el-switch v-model="supplementScheduleForm.enabled" />
+          </div>
+        </div>
+        <template v-if="supplementScheduleForm.enabled">
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">北京时间 Cron</div>
+            <div class="al-schedule-presets" style="margin-bottom:8px">
+              <button
+                v-for="preset in supplementSchedulePresets"
+                :key="preset.cron"
+                type="button"
+                :class="{ active: supplementScheduleForm.cron === preset.cron }"
+                @click="supplementScheduleForm.cron = preset.cron"
+              >
+                {{ preset.label }}
+              </button>
+            </div>
+            <el-input v-model="supplementScheduleForm.cron" placeholder="0 10 * * *" style="font-family:monospace" />
+          </div>
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">
+              人设补充视频分类
+              <span class="al-supplement-filter-hint">不选择 = 不启用分类过滤</span>
+            </div>
+            <div class="al-supplement-category-groups">
+              <div v-for="major in MAJOR_KEYS" :key="major" class="al-supplement-category-group">
+                <div class="al-supplement-category-major">
+                  <span :class="`al-supplement-major-dot is-${major}`"></span>
+                  <span>{{ MAJOR_LABEL_MAP[major] }}</span>
+                </div>
+                <div class="al-cat-filter-pills">
+                  <button
+                    v-for="cat in CATEGORY_OPTIONS.filter(c => c.major === major)"
+                    :key="cat.key"
+                    type="button"
+                    class="al-cat-pill"
+                    :class="[`is-${cat.major}`, { active: supplementScheduleForm.categoryKeys.includes(cat.key) }]"
+                    @click="toggleSupplementScheduleCategory(cat.key)"
+                  >
+                    {{ cat.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">目标未使用模板数量（每个博主）</div>
+            <div class="al-supplement-config-row">
+              <button class="al-supplement-minus" @click="supplementScheduleForm.targetUnusedTemplateCount = Math.max(1, supplementScheduleForm.targetUnusedTemplateCount - 1)">−</button>
+              <span class="al-supplement-num">{{ supplementScheduleForm.targetUnusedTemplateCount }}</span>
+              <button class="al-supplement-plus" @click="supplementScheduleForm.targetUnusedTemplateCount = Math.min(50, supplementScheduleForm.targetUnusedTemplateCount + 1)">+</button>
+              <span class="al-supplement-num-hint">个</span>
+            </div>
+          </div>
+          <div class="al-supplement-config">
+            <div class="al-supplement-config-label">过滤条件（留空 = 不限）</div>
+            <div class="al-supplement-filters">
+              <div class="al-supplement-filter-row">
+                <label>最少播放量</label>
+                <el-input-number v-model="supplementScheduleForm.minViewCount" :min="0" :step="1000" controls-position="right" placeholder="不限" style="width:180px" />
+                <span class="al-supplement-filter-hint">view_count ≥ 该值才采集</span>
+              </div>
+              <div class="al-supplement-filter-row">
+                <label>发布日期之后</label>
+                <el-date-picker v-model="supplementScheduleForm.publishedAfter" type="date" value-format="YYYY-MM-DD" placeholder="不限" style="width:180px" />
+                <span class="al-supplement-filter-hint">仅该日期及之后发布的视频</span>
+              </div>
+              <div class="al-supplement-filter-row">
+                <label>时长上限（秒）</label>
+                <el-input-number v-model="supplementScheduleForm.maxDurationSeconds" :min="0" :step="5" controls-position="right" placeholder="不限" style="width:180px" />
+                <span class="al-supplement-filter-hint">视频时长 ≤ 该值</span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="showSupplementScheduleDialog = false">取消</el-button>
+        <el-button type="primary" :loading="supplementScheduleSaving" @click="saveSupplementSchedule">保存</el-button>
       </template>
     </el-dialog>
 
@@ -1649,9 +1750,12 @@
                   <span class="ac-supplement-mode">{{ supplementModeLabel(item.supplement_status.mode) }}</span>
                 </div>
                 <div class="ac-supplement-lines">
-                  <span>已补充 {{ item.supplement_status.completed_count || 0 }} 个</span>
-                  <span v-if="item.supplement_status.status === 'running'">还有 {{ item.supplement_status.remaining_count || 0 }} 个需要补充</span>
-                  <span v-else-if="item.supplement_status.status === 'failed'">应该补充 {{ item.supplement_status.target_count || 0 }} 个</span>
+                  <span v-if="item.supplement_status.current_unused_template_count !== null && item.supplement_status.current_unused_template_count !== undefined">
+                    未使用模板 {{ item.supplement_status.current_unused_template_count || 0 }}/{{ item.supplement_status.target_unused_template_count || item.supplement_status.target_count || 0 }}
+                  </span>
+                  <span v-else>本轮新增 {{ item.supplement_status.completed_count || 0 }} 个</span>
+                  <span v-if="item.supplement_status.status === 'running'">本轮请求 {{ item.supplement_status.requested_video_count || item.supplement_status.target_count || 0 }} 个</span>
+                  <span v-else-if="item.supplement_status.status === 'failed'">目标 {{ item.supplement_status.target_unused_template_count || item.supplement_status.target_count || 0 }} 个</span>
                 </div>
               </div>
 
@@ -2155,7 +2259,7 @@ import { fetchFlags, createFlag, updateFlag, deleteFlag, bulkBindFlags, bulkUnbi
 import { fetchBloggerTaggingProgress, submitBloggerTagging } from '../api/persona_tagging'
 import { syncAccountSnapshots } from '../api/video_publications'
 import { isDuplicateRequestError } from '../api/http'
-import { fetchPipelineSettings, updatePipelineSettings } from '../api/settings'
+import { fetchPipelineSettings, updatePipelineSettings, fetchTemplateSupplementConfig, updateTemplateSupplementConfig } from '../api/settings'
 import { downloadLatestPublishedVideos } from '../api/video_tasks'
 
 const route = useRoute()
@@ -3766,17 +3870,34 @@ const showSupplementDialog = ref(false)
 const supplementing = ref(false)
 const supplementForm = ref({
   templateType: 'shared',
-  targetVideoCount: 10,
+  targetUnusedTemplateCount: 10,
   minViewCount: 10000,
   publishedAfter: '2024-01-01',
   maxDurationSeconds: 30,
   categoryKeys: [],
 })
+const showSupplementScheduleDialog = ref(false)
+const supplementScheduleSaving = ref(false)
+const supplementSchedulePresets = [
+  { label: '每天10点', cron: '0 10 * * *' },
+  { label: '每天18点', cron: '0 18 * * *' },
+  { label: '每6小时', cron: '0 */6 * * *' },
+]
+const supplementScheduleForm = ref({
+  enabled: false,
+  cron: '0 10 * * *',
+  targetUnusedTemplateCount: 10,
+  minViewCount: 10000,
+  publishedAfter: '2024-01-01',
+  maxDurationSeconds: 30,
+  categoryKeys: [],
+  maxRounds: 2,
+})
 
 function openSupplementDialog() {
   supplementForm.value = {
     templateType: 'shared',
-    targetVideoCount: 10,
+    targetUnusedTemplateCount: 10,
     minViewCount: 10000,
     publishedAfter: '2024-01-01',
     maxDurationSeconds: 30,
@@ -3791,6 +3912,24 @@ function toggleSupplementCategory(key) {
     supplementForm.value.categoryKeys = values.filter(v => v !== key)
   } else {
     supplementForm.value.categoryKeys = [...values, key]
+  }
+}
+
+function toggleSupplementScheduleCategory(key) {
+  const values = supplementScheduleForm.value.categoryKeys || []
+  if (values.includes(key)) {
+    supplementScheduleForm.value.categoryKeys = values.filter(v => v !== key)
+  } else {
+    supplementScheduleForm.value.categoryKeys = [...values, key]
+  }
+}
+
+function buildSupplementFiltersFromForm(form, includeCategories = true) {
+  return {
+    min_view_count: form.minViewCount,
+    published_after: form.publishedAfter,
+    max_duration_seconds: form.maxDurationSeconds,
+    category_keys: includeCategories ? [...(form.categoryKeys || [])] : [],
   }
 }
 
@@ -3816,15 +3955,8 @@ async function handleSupplement() {
   // shared 模式不使用弹窗过滤条件（走内部 pipeline_settings 默认）
   const filters = supplementForm.value.templateType === 'shared'
     ? null
-    : {
-        min_view_count: supplementForm.value.minViewCount,
-        published_after: supplementForm.value.publishedAfter,
-        max_duration_seconds: supplementForm.value.maxDurationSeconds,
-        category_keys: supplementForm.value.templateType === 'exclusive'
-          ? [...(supplementForm.value.categoryKeys || [])]
-          : [],
-      }
-  const target = supplementForm.value.targetVideoCount
+    : buildSupplementFiltersFromForm(supplementForm.value, supplementForm.value.templateType === 'exclusive')
+  const target = supplementForm.value.targetUnusedTemplateCount
   try {
     let result
     if (supplementForm.value.templateType === 'auto') {
@@ -3845,6 +3977,46 @@ async function handleSupplement() {
     ElMessage.error(e?.response?.data?.detail || '启动补充模板失败')
   } finally {
     supplementing.value = false
+  }
+}
+
+async function openSupplementScheduleDialog() {
+  try {
+    const data = await fetchTemplateSupplementConfig()
+    const filters = data.template_supplement_filters || {}
+    supplementScheduleForm.value = {
+      enabled: data.template_supplement_schedule_enabled ?? false,
+      cron: data.template_supplement_schedule_cron || '0 10 * * *',
+      targetUnusedTemplateCount: data.template_supplement_target_unused_count || 10,
+      minViewCount: filters.min_view_count ?? 10000,
+      publishedAfter: filters.published_after || '2024-01-01',
+      maxDurationSeconds: filters.max_duration_seconds ?? 30,
+      categoryKeys: Array.isArray(filters.category_keys) ? filters.category_keys : [],
+      maxRounds: data.template_supplement_max_rounds || 2,
+    }
+    showSupplementScheduleDialog.value = true
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '加载定时补充配置失败')
+  }
+}
+
+async function saveSupplementSchedule() {
+  if (supplementScheduleSaving.value) return
+  supplementScheduleSaving.value = true
+  try {
+    await updateTemplateSupplementConfig({
+      template_supplement_schedule_enabled: supplementScheduleForm.value.enabled,
+      template_supplement_schedule_cron: supplementScheduleForm.value.cron || '0 10 * * *',
+      template_supplement_target_unused_count: supplementScheduleForm.value.targetUnusedTemplateCount,
+      template_supplement_filters: buildSupplementFiltersFromForm(supplementScheduleForm.value, true),
+      template_supplement_max_rounds: supplementScheduleForm.value.maxRounds || 2,
+    })
+    showSupplementScheduleDialog.value = false
+    ElMessage.success(supplementScheduleForm.value.enabled ? '定时补充已启用' : '定时补充已关闭')
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || '保存定时补充配置失败')
+  } finally {
+    supplementScheduleSaving.value = false
   }
 }
 
