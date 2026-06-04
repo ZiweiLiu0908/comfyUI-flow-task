@@ -482,7 +482,12 @@
       destroy-on-close
     >
       <div class="al-bulk-resume-hint" style="margin-bottom:16px">
-        以下设置将强制启用并覆盖全部 <strong>{{ total }}</strong> 个账号的定时发布配置。
+        <template v-if="selectedMap.size > 0">
+          以下设置将强制启用并覆盖已选 <strong>{{ selectedMap.size }}</strong> 个账号的定时发布配置。
+        </template>
+        <template v-else>
+          以下设置将强制启用并覆盖当前筛选结果 <strong>{{ total }}</strong> 个账号的定时发布配置。
+        </template>
       </div>
       <el-form :model="bulkScheduleForm" label-width="120px" label-position="left">
         <el-form-item label="快捷规则">
@@ -3775,6 +3780,8 @@ async function startBulkVideoGenerate() {
       if (filterPlatformBindingStatus.value) filters.platform_binding_status = filterPlatformBindingStatus.value
       if (filterClassificationType.value) filters.classification_type = filterClassificationType.value
       if (filterCategoryIndices.value.length > 0) filters.category_keys = filterCategoryIndices.value
+      if (filterFlagId.value) filters.flag_id = filterFlagId.value
+      if (searchQuery.value.trim()) filters.search = searchQuery.value.trim()
     }
 
     const result = await bulkGenerateVideoTasks(accountIds, mode, limit, bulkGenForm.value.subtaskCount, fill_mode, filters)
@@ -3844,6 +3851,8 @@ async function handleBulkSchedule() {
     if (filterPlatformBindingStatus.value) filters.platform_binding_status = filterPlatformBindingStatus.value
     if (filterClassificationType.value) filters.classification_type = filterClassificationType.value
     if (filterCategoryIndices.value.length > 0) filters.category_keys = filterCategoryIndices.value
+    if (filterFlagId.value) filters.flag_id = filterFlagId.value
+    if (searchQuery.value.trim()) filters.search = searchQuery.value.trim()
   }
 
   try {
