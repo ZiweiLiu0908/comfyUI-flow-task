@@ -457,7 +457,10 @@ async def sync_kol_link_clicks(
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """按美东自然日后台重算 KOL Link 点击数。"""
+    """按美东自然日后台重算 KOL Link 点击数。
+
+    不传 date_from/date_to 时，只处理 UTC 当天发布的视频，避免按钮误扫历史数据。
+    """
     from sqlalchemy import select, func
     from app.db.session import SessionLocal
     from app.models.account import Account
@@ -466,6 +469,11 @@ async def sync_kol_link_clicks(
     from app.services.publication_metrics_scheduler import collect_kol_link_clicks
 
     owner_id = None if current_user.is_admin else current_user.user_id
+    if date_from is None and date_to is None:
+        from datetime import datetime, timezone
+        today_utc = datetime.now(timezone.utc).date()
+        date_from = today_utc
+        date_to = today_utc
 
     stmt = (
         select(func.count())
