@@ -18,6 +18,8 @@ _SNAPSHOT_SORT_FIELDS = {
     "latest_video_published_at": "performance_snapshot->>'latest_video_published_at'",
     "followers_count": "performance_snapshot->>'followers_count'",
     "total_views": "performance_snapshot->>'total_views'",
+    "total_kol_link_clicks": "performance_snapshot->>'total_kol_link_clicks'",
+    "avg_video_click_rate": "performance_snapshot->>'avg_video_click_rate'",
 }
 
 # Sortable columns on the Account table itself
@@ -90,7 +92,7 @@ async def list_accounts(
         json_expr = _SNAPSHOT_SORT_FIELDS[sort_by]
         # Extract the raw JSON text value via a literal column expression
         raw_col = text(json_expr)
-        if sort_by in ("avg_views", "avg_like_rate", "followers_count", "total_views"):
+        if sort_by in ("avg_views", "avg_like_rate", "followers_count", "total_views", "total_kol_link_clicks", "avg_video_click_rate"):
             # Cast to float so numeric ordering works correctly
             typed_col = func.cast(func.nullif(raw_col, ""), Float)
         else:

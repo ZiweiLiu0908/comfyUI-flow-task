@@ -1749,8 +1749,14 @@
               <span class="al-th-label">点赞率</span>
               <span class="al-sort-icon"><SortIcon field="avg_like_rate" :sort-by="sortBy" :sort-order="sortOrder" /></span>
             </th>
-            <th class="al-th al-th-stat">Link总点击</th>
-            <th class="al-th al-th-stat">平均点击率</th>
+            <th class="al-th al-th-stat al-th-sortable" @click="toggleSort('total_kol_link_clicks')">
+              <span class="al-th-label">Link总点击</span>
+              <span class="al-sort-icon"><SortIcon field="total_kol_link_clicks" :sort-by="sortBy" :sort-order="sortOrder" /></span>
+            </th>
+            <th class="al-th al-th-stat al-th-sortable" @click="toggleSort('avg_video_click_rate')">
+              <span class="al-th-label">平均点击率</span>
+              <span class="al-sort-icon"><SortIcon field="avg_video_click_rate" :sort-by="sortBy" :sort-order="sortOrder" /></span>
+            </th>
             <th class="al-th al-th-date al-th-sortable" @click="toggleSort('latest_video_published_at')">
               <span class="al-th-label">最新发布</span>
               <span class="al-sort-icon"><SortIcon field="latest_video_published_at" :sort-by="sortBy" :sort-order="sortOrder" /></span>
