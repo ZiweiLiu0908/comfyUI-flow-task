@@ -21,6 +21,10 @@ from app.services.publication_metrics_scheduler import start_publication_metrics
 from app.services.video_stats_collector import stop_video_stats_collector
 from app.services.account_publish_scheduler import start_account_publish_scheduler, stop_account_publish_scheduler
 from app.services.candidate_scheduler_service import start_candidate_scheduler, stop_candidate_scheduler
+from app.services.template_supplement_scheduler_service import (
+    start_template_supplement_scheduler,
+    stop_template_supplement_scheduler,
+)
 from app.services.lark_notify_scheduler import start_lark_notify_scheduler, stop_lark_notify_scheduler
 from app.services.channel_status_poller import start_channel_status_poller, stop_channel_status_poller
 from app.services.channel_name_sync_scheduler import start_channel_name_sync_scheduler, stop_channel_name_sync_scheduler
@@ -117,6 +121,7 @@ async def startup_event() -> None:
     # start_video_stats_collector()  # 暂停：每日统计定时任务
     start_account_publish_scheduler()
     start_candidate_scheduler()
+    start_template_supplement_scheduler()
     start_lark_notify_scheduler()
     start_channel_status_poller()
     start_channel_name_sync_scheduler()
@@ -144,6 +149,7 @@ async def shutdown_event() -> None:
     await stop_promotion_code_distributor()
     await stop_account_publish_scheduler()
     await stop_candidate_scheduler()
+    await stop_template_supplement_scheduler()
     await stop_publish_meta_workers()
     await stop_lark_notify_scheduler()
     await stop_channel_status_poller()

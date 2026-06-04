@@ -105,6 +105,11 @@ export async function retryKolProvision(accountId) {
   return data
 }
 
+export async function syncAccountTemplateTags(accountId) {
+  const { data } = await http.post(`/accounts/${accountId}/sync-template-tags`)
+  return data
+}
+
 // 账号-标签绑定
 export async function fetchAccountTags(accountId) {
   const { data } = await http.get(`/accounts/${accountId}/tags`)
@@ -127,20 +132,25 @@ export async function exportVideoUrls(accountIds) {
 }
 
 function _normalizeFilters(filters = {}) {
+  filters = filters || {}
   // 把空值 / 0 视为不限，转 null
   const minV = filters.min_view_count
   const pub = filters.published_after
   const dur = filters.max_duration_seconds
+  const cats = Array.isArray(filters.category_keys)
+    ? filters.category_keys.filter(Boolean)
+    : []
   return {
     min_view_count: typeof minV === 'number' && minV > 0 ? minV : null,
     published_after: pub || null,
     max_duration_seconds: typeof dur === 'number' && dur > 0 ? dur : null,
+    category_keys: cats,
   }
 }
 
-export async function autoSupplementTemplates(accountIds, targetVideoCount = 10, filters = {}, accountListFilters = null) {
+export async function autoSupplementTemplates(accountIds, targetUnusedTemplateCount = 10, filters = {}, accountListFilters = null) {
   const payload = {
-    target_video_count: targetVideoCount,
+    target_unused_template_count: targetUnusedTemplateCount,
     filters: _normalizeFilters(filters),
   }
   if (accountIds && accountIds.length > 0) {
@@ -152,10 +162,10 @@ export async function autoSupplementTemplates(accountIds, targetVideoCount = 10,
   return data
 }
 
-export async function supplementTemplates(accountIds, templateType = 'shared', targetVideoCount = 10, filters = {}, accountListFilters = null) {
+export async function supplementTemplates(accountIds, templateType = 'shared', targetUnusedTemplateCount = 10, filters = {}, accountListFilters = null) {
   const payload = {
     template_type: templateType,
-    target_video_count: targetVideoCount,
+    target_unused_template_count: targetUnusedTemplateCount,
     filters: _normalizeFilters(filters),
   }
   if (accountIds && accountIds.length > 0) {

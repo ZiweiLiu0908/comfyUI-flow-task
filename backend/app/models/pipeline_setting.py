@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import DateTime, Float, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -130,6 +130,13 @@ class PipelineSetting(Base):
     candidate_schedule_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     candidate_schedule_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
     candidate_search_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0=不间隔
+    # 模板定时补充（北京时间 cron）
+    template_supplement_schedule_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    template_supplement_schedule_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    template_supplement_target_unused_count: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    template_supplement_filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    template_supplement_max_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    template_supplement_last_trigger_key: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # 人脸选择配置
     face_select_model: Mapped[str] = mapped_column(String(200), nullable=False, default="gemini-3.1-pro-preview")
     face_select_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
