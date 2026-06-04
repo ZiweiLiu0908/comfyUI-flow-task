@@ -987,6 +987,7 @@ async function handleSyncMetrics() {
       account_id: filters.account_id || undefined,
       date_from: filters.date_from || undefined,
       date_to: filters.date_to || undefined,
+      keyword: filters.keyword || undefined,
     })
     ElMessage.success(result.message || '同步任务已提交')
     await load()
@@ -1007,6 +1008,7 @@ async function handleSyncKolClicks() {
       account_id: filters.account_id || undefined,
       date_from: filters.date_from || undefined,
       date_to: filters.date_to || undefined,
+      keyword: filters.keyword || undefined,
     })
     ElMessage.success(result.message || 'Link 点击同步任务已提交')
     await load()

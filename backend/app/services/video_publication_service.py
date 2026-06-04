@@ -2213,6 +2213,15 @@ class VideoPublicationService:
 
         publications = list((await self.db.execute(stmt)).scalars().all())
 
+        # platform / keyword 是 post-filter（列表页一致逻辑），用 get_publication_stats_all
+        # 拿到匹配的 publication id 集合，再过滤 publications，保证同步范围和列表页完全一致。
+        platform = (query.platform or "").strip()
+        keyword = (query.keyword or "").strip()
+        if platform or keyword:
+            matched_items = await self.get_publication_stats_all(query, owner_id=owner_id)
+            matched_ids = {item.id for item in matched_items}
+            publications = [pub for pub in publications if pub.id in matched_ids]
+
         synced = 0
         failed = 0
         for pub in publications:

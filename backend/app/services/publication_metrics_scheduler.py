@@ -435,6 +435,7 @@ async def collect_kol_link_clicks(
     db,
     *,
     publication_id=None,
+    publication_ids=None,
     owner_id=None,
     account_id=None,
     date_from=None,
@@ -473,6 +474,11 @@ async def collect_kol_link_clicks(
         stmt = stmt.where(VideoPublication.completed_at <= cutoff_utc)
     if publication_id is not None:
         stmt = stmt.where(VideoPublication.id == publication_id)
+    if publication_ids is not None:
+        # 显式限定到一批 publication（用于 keyword 等 post-filter 后的精确同步）
+        if not publication_ids:
+            return {"updated": 0, "skipped": 0, "failed": 0, "total": 0}
+        stmt = stmt.where(VideoPublication.id.in_(list(publication_ids)))
     if owner_id is not None:
         stmt = stmt.where(VideoTask.owner_id == owner_id)
     if account_id is not None:

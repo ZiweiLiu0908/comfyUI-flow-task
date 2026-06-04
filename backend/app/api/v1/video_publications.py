@@ -390,6 +390,7 @@ async def sync_publication_metrics(
     account_id: uuid.UUID | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    keyword: str | None = Query(None, description="标题/账号/渠道/平台链接关键字"),
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -403,36 +404,47 @@ async def sync_publication_metrics(
         account_id=account_id,
         date_from=date_from,
         date_to=date_to,
+        keyword=keyword,
     )
     owner_id = None if current_user.is_admin else current_user.user_id
 
     # 先查数量
     from datetime import date as date_type
     from app.models.video_publication import VideoPublication
-    stmt = (
-        select(func.count())
-        .select_from(VideoPublication)
-        .join(VideoSubTask, VideoSubTask.id == VideoPublication.sub_task_id)
-        .join(VideoTask, VideoTask.id == VideoSubTask.task_id)
-        .where(VideoPublication.status.in_(["completed", "partial"]))
-        .where(VideoPublication.open_api_task_id.isnot(None))
-    )
-    if owner_id is not None:
-        stmt = stmt.where(VideoTask.owner_id == owner_id)
-    if query.account_id is not None:
-        stmt = stmt.where(VideoTask.account_id == query.account_id)
-    if query.date_from is not None:
-        from datetime import datetime, timezone
-        stmt = stmt.where(
-            VideoPublication.completed_at >= datetime.combine(query.date_from, datetime.min.time(), tzinfo=timezone.utc)
+
+    if platform or (keyword and keyword.strip()):
+        # platform / keyword 走 post-filter，复用 service 计数以与列表页一致
+        service = VideoPublicationService(db)
+        matched_items = await service.get_publication_stats_all(query, owner_id=owner_id)
+        total = sum(
+            1 for item in matched_items
+            if item.status in ("completed", "partial")
         )
-    if query.date_to is not None:
-        from datetime import datetime, timezone
-        next_day = date_type.fromordinal(query.date_to.toordinal() + 1)
-        stmt = stmt.where(
-            VideoPublication.completed_at < datetime.combine(next_day, datetime.min.time(), tzinfo=timezone.utc)
+    else:
+        stmt = (
+            select(func.count())
+            .select_from(VideoPublication)
+            .join(VideoSubTask, VideoSubTask.id == VideoPublication.sub_task_id)
+            .join(VideoTask, VideoTask.id == VideoSubTask.task_id)
+            .where(VideoPublication.status.in_(["completed", "partial"]))
+            .where(VideoPublication.open_api_task_id.isnot(None))
         )
-    total = (await db.execute(stmt)).scalar() or 0
+        if owner_id is not None:
+            stmt = stmt.where(VideoTask.owner_id == owner_id)
+        if query.account_id is not None:
+            stmt = stmt.where(VideoTask.account_id == query.account_id)
+        if query.date_from is not None:
+            from datetime import datetime, timezone
+            stmt = stmt.where(
+                VideoPublication.completed_at >= datetime.combine(query.date_from, datetime.min.time(), tzinfo=timezone.utc)
+            )
+        if query.date_to is not None:
+            from datetime import datetime, timezone
+            next_day = date_type.fromordinal(query.date_to.toordinal() + 1)
+            stmt = stmt.where(
+                VideoPublication.completed_at < datetime.combine(next_day, datetime.min.time(), tzinfo=timezone.utc)
+            )
+        total = (await db.execute(stmt)).scalar() or 0
 
     async def _run():
         try:
@@ -454,6 +466,7 @@ async def sync_kol_link_clicks(
     account_id: uuid.UUID | None = Query(None),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    keyword: str | None = Query(None, description="标题/账号/渠道/平台链接关键字"),
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -504,13 +517,30 @@ async def sync_kol_link_clicks(
             pub for pub in publications
             if publication_has_platform(pub, platform)
         ]
+
+    # keyword 走 post-filter：用 service 算出匹配的 publication id，再交集
+    keyword_ids = None
+    if keyword and keyword.strip():
+        service = VideoPublicationService(db)
+        kw_query = VideoPublicationStatsQuery(
+            platform=platform,
+            account_id=account_id,
+            keyword=keyword,
+        )
+        matched_items = await service.get_publication_stats_all(kw_query, owner_id=owner_id)
+        keyword_ids = {item.id for item in matched_items}
+        publications = [pub for pub in publications if pub.id in keyword_ids]
+
     total = len(publications)
+    # 把当前筛选范围（含 keyword）锁定为精确 id 集合，避免后台重新按宽口径扫描
+    target_ids = [pub.id for pub in publications]
 
     async def _run():
         try:
             async with SessionLocal() as bg_db:
                 result = await collect_kol_link_clicks(
                     bg_db,
+                    publication_ids=target_ids,
                     owner_id=owner_id,
                     account_id=account_id,
                     date_from=date_from,
