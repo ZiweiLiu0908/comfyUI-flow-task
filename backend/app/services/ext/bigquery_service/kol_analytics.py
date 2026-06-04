@@ -2,7 +2,7 @@
 KOL analytics queries against the external project's BigQuery dataset.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 from google.cloud import bigquery
 
@@ -111,18 +111,19 @@ def get_channel_daily_views(
 
 def get_kol_clicks_in_window(
     kol_user_id: str,
-    window_start: date,
-    window_end: date,
+    window_start: datetime,
+    window_end: datetime,
 ) -> int:
     """
-    Count v_thirdapp_open events for a given KOL within [window_start, window_end].
+    Count v_thirdapp_open events for a given KOL within [window_start, window_end).
     Used to collect the 24-hour post-publish click count for a single publication.
     Returns the event count, or 0 if no data found.
     """
     sql = """
         SELECT COUNT(*) AS cnt
         FROM decom.dwd_event_log
-        WHERE DATE(logAt_timestamp) BETWEEN @start_date AND @end_date
+        WHERE logAt_timestamp >= @window_start
+          AND logAt_timestamp < @window_end
           AND event_name = 'v_thirdapp_open'
           AND JSON_VALUE(args, '$.sf') != ''
           AND REGEXP_EXTRACT(prop_params, r'kolUserId=(\\d+)') = @kol_user_id
@@ -130,8 +131,8 @@ def get_kol_clicks_in_window(
 
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
-            bigquery.ScalarQueryParameter("start_date", "DATE", window_start.isoformat()),
-            bigquery.ScalarQueryParameter("end_date", "DATE", window_end.isoformat()),
+            bigquery.ScalarQueryParameter("window_start", "TIMESTAMP", window_start),
+            bigquery.ScalarQueryParameter("window_end", "TIMESTAMP", window_end),
             bigquery.ScalarQueryParameter("kol_user_id", "STRING", kol_user_id),
         ]
     )

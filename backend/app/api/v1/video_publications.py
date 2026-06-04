@@ -444,7 +444,7 @@ async def sync_publication_metrics(
             logger.exception("sync-metrics background failed")
 
     background_tasks.add_task(_run)
-    return {"total": total, "message": f"后台同步 {total} 条视频数据中"}
+ti    return {"total": total, "message": f"后台同步 {total} 条视频数据中"}
 
 
 @router.post("/video-publications/sync-kol-clicks")
@@ -457,11 +457,12 @@ async def sync_kol_link_clicks(
     current_user: TokenData = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """按美东自然日后台重算 KOL Link 点击数。
+    """后台重算 KOL Link 点击数。
 
-    不传 date_from/date_to 时，只处理美东当天发布的视频，避免按钮误扫历史数据。
+    date_from/date_to 只用于按美东自然日筛选要处理的视频；每条视频按自己的
+    completed_at 后 24 小时窗口统计点击。不传日期时只处理美东当天发布的视频。
     """
-    from sqlalchemy import select, func
+    from sqlalchemy import select
     from app.db.session import SessionLocal
     from app.models.account import Account
     from app.models.video_publication import VideoPublication
@@ -469,6 +470,7 @@ async def sync_kol_link_clicks(
     from app.services.publication_metrics_scheduler import (
         collect_kol_link_clicks,
         eastern_date_range_to_utc,
+        publication_has_platform,
         today_eastern_date,
     )
 
@@ -479,8 +481,7 @@ async def sync_kol_link_clicks(
         date_to = today_eastern
 
     stmt = (
-        select(func.count())
-        .select_from(VideoPublication)
+        select(VideoPublication)
         .join(VideoSubTask, VideoSubTask.id == VideoPublication.sub_task_id)
         .join(VideoTask, VideoTask.id == VideoSubTask.task_id)
         .join(Account, Account.id == VideoTask.account_id)
@@ -497,7 +498,13 @@ async def sync_kol_link_clicks(
         stmt = stmt.where(VideoPublication.completed_at >= date_start_utc)
     if date_end_utc is not None:
         stmt = stmt.where(VideoPublication.completed_at < date_end_utc)
-    total = (await db.execute(stmt)).scalar() or 0
+    publications = list((await db.execute(stmt)).scalars().all())
+    if platform:
+        publications = [
+            pub for pub in publications
+            if publication_has_platform(pub, platform)
+        ]
+    total = len(publications)
 
     async def _run():
         try:
