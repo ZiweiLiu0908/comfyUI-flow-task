@@ -18,6 +18,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # alembic_version.version_num 默认 VARCHAR(32)，本 revision ID 长 35 字符，先扩列
+    op.execute(
+        "ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"
+    )
     op.execute(
         """
         DELETE FROM video_source_tags
