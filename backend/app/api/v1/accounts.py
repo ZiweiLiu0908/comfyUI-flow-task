@@ -52,6 +52,17 @@ router = APIRouter(prefix="/accounts", tags=["accounts"])
 logger = logging.getLogger("app.accounts")
 
 
+async def _ensure_template_tags_for_account(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    owner_id: uuid.UUID | None,
+) -> dict:
+    from app.services.account_template_tag_service import ensure_account_template_tags
+
+    result = await ensure_account_template_tags(session, account_id, owner_id=owner_id)
+    return result.model_dump()
+
+
 def _get_owner_id(current_user: TokenData = Depends(get_current_user)) -> uuid.UUID | None:
     """For queries: admin sees all (None = no filter), regular user sees own only."""
     return None if current_user.is_admin else current_user.user_id
@@ -973,7 +984,7 @@ async def bind_blogger_to_account(
     body: BindBloggerBody,
     owner_id: uuid.UUID | None = Depends(_get_owner_id),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
+) -> dict:
     """绑定TikTok博主到账号。"""
     await get_account_or_404(session, account_id, owner_id)
 
@@ -987,7 +998,10 @@ async def bind_blogger_to_account(
         .where(AccountBloggerBinding.tiktok_blogger_id == body.tiktok_blogger_id)
     )
     if existing:
-        return {"status": "already_bound"}
+        sync_result = await _ensure_template_tags_for_account(session, account_id, owner_id)
+        if sync_result.get("newly_bound", 0) > 0:
+            await session.commit()
+        return {"status": "already_bound", "template_tag_sync": sync_result}
 
     binding = AccountBloggerBinding(
         account_id=account_id,
@@ -995,8 +1009,10 @@ async def bind_blogger_to_account(
         created_at=datetime.now(timezone.utc),
     )
     session.add(binding)
+    await session.flush()
+    sync_result = await _ensure_template_tags_for_account(session, account_id, owner_id)
     await session.commit()
-    return {"status": "bound"}
+    return {"status": "bound", "template_tag_sync": sync_result}
 
 
 @router.delete("/{account_id}/bloggers/{blogger_id}")
@@ -1027,7 +1043,7 @@ async def trigger_ai_generation(
     body: AIGenerateBody,
     owner_id: uuid.UUID | None = Depends(_get_owner_id),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
+) -> dict:
     """触发 AI 生成博主照片候选、头像和账号资料。"""
     from app.services.ai_account_service import enqueue_ai_account_generation
 
@@ -1074,10 +1090,12 @@ async def trigger_ai_generation(
                 tiktok_blogger_id=tiktok_blogger_id,
             ))
 
+    await session.flush()
+    sync_result = await _ensure_template_tags_for_account(session, account_id, owner_id)
     await session.commit()
 
     await enqueue_ai_account_generation(str(account_id), tag_ids_str)
-    return {"status": "queued"}
+    return {"status": "queued", "template_tag_sync": sync_result}
 
 
 @router.get("/{account_id}/ai-generate/status", response_model=AIGenerateStatusResponse)
@@ -1276,6 +1294,10 @@ async def bulk_generate_ai_bloggers(
 
         created_accounts.append(account)
         created_tag_ids.append(str(tag.id))
+
+    await session.flush()
+    for account in created_accounts:
+        await _ensure_template_tags_for_account(session, account.id, creator_id)
 
     await session.commit()
 
@@ -1551,7 +1573,7 @@ async def bind_tag_to_account(
     body: BindTagBody,
     owner_id: uuid.UUID | None = Depends(_get_owner_id),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
+) -> dict:
     """绑定标签到账号。"""
     await get_account_or_404(session, account_id, owner_id)
     tag = await session.get(Tag, body.tag_id)
@@ -1563,10 +1585,31 @@ async def bind_tag_to_account(
         .where(AccountTag.tag_id == body.tag_id)
     )
     if existing:
-        return {"status": "already_bound"}
+        sync_result = await _ensure_template_tags_for_account(session, account_id, owner_id)
+        if sync_result.get("newly_bound", 0) > 0:
+            await session.commit()
+        return {"status": "already_bound", "template_tag_sync": sync_result}
     session.add(AccountTag(account_id=account_id, tag_id=body.tag_id))
+    await session.flush()
+    sync_result = await _ensure_template_tags_for_account(session, account_id, owner_id)
     await session.commit()
-    return {"status": "bound"}
+    return {"status": "bound", "template_tag_sync": sync_result}
+
+
+@router.post("/{account_id}/sync-template-tags")
+async def sync_account_template_tags(
+    account_id: uuid.UUID,
+    owner_id: uuid.UUID | None = Depends(_get_owner_id),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """把绑定博主下已有模板补绑到当前账号 tag。"""
+    await get_account_or_404(session, account_id, owner_id)
+    try:
+        result = await _ensure_template_tags_for_account(session, account_id, owner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await session.commit()
+    return {"status": "ok", **result}
 
 
 @router.delete("/{account_id}/tags/{tag_id}")

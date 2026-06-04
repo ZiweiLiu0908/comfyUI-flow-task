@@ -1875,6 +1875,7 @@
                 <button class="ac-btn ac-btn-stats" @click="openInNewTab({ name: 'publication-stats', query: { account_id: item.id } })">统计</button>
                 <button class="ac-btn ac-btn-analytics" @click="openAnalyticsDialog(item)">数据</button>
                 <button class="ac-btn ac-btn-sync" :class="{ loading: syncingId === item.id }" @click="handleSyncAccount(item)">{{ syncingId === item.id ? '同步中' : '同步' }}</button>
+                <button class="ac-btn ac-btn-template-sync" :class="{ loading: templateSyncingId === item.id }" @click="handleSyncTemplateTags(item)">{{ templateSyncingId === item.id ? '同步中' : '同步模板' }}</button>
                 <button class="ac-btn ac-btn-classify" @click="openClassificationDialog(item)">分类</button>
                 <button class="ac-btn ac-btn-edit" @click="openInNewTab(`/dashboard/accounts/${item.id}/edit`)">编辑</button>
                 <button class="ac-btn ac-btn-del" :class="{ loading: deleting === item.id }" @click="handleDelete(item)">删除</button>
@@ -2149,7 +2150,7 @@ import * as echarts from 'echarts'
 import { useRoute, useRouter } from 'vue-router'
 import { openInNewTab } from '../utils/nav'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { bulkGenerateAIAccounts, bulkResumeAIAccountGeneration, fetchAccounts, deleteAccount, updateScheduledPublish, supplementTemplates, autoSupplementTemplates, bulkGenerateVideoTasks, bulkUpdateScheduledPublish, patchAccount, bulkUpdateAccountAttributes, bulkGenerateNameHandle, bulkSearchHashtags, exportVideoUrls, fetchPlatformStats, startAccountClassification, fetchAccountClassification, retryAccountClassificationFailed, batchClassifyVideos, previewTierEvaluation, applyTierEvaluation, retryKolProvision, fetchChannelAnalytics, bulkPersonaTagging } from '../api/accounts'
+import { bulkGenerateAIAccounts, bulkResumeAIAccountGeneration, fetchAccounts, deleteAccount, updateScheduledPublish, supplementTemplates, autoSupplementTemplates, bulkGenerateVideoTasks, bulkUpdateScheduledPublish, patchAccount, bulkUpdateAccountAttributes, bulkGenerateNameHandle, bulkSearchHashtags, exportVideoUrls, fetchPlatformStats, startAccountClassification, fetchAccountClassification, retryAccountClassificationFailed, batchClassifyVideos, previewTierEvaluation, applyTierEvaluation, retryKolProvision, fetchChannelAnalytics, bulkPersonaTagging, syncAccountTemplateTags } from '../api/accounts'
 import { fetchFlags, createFlag, updateFlag, deleteFlag, bulkBindFlags, bulkUnbindFlags } from '../api/flags'
 import { fetchBloggerTaggingProgress, submitBloggerTagging } from '../api/persona_tagging'
 import { syncAccountSnapshots } from '../api/video_publications'
@@ -2368,6 +2369,7 @@ async function handleExportVideoUrls() {
 }
 
 const syncingId = ref(null)
+const templateSyncingId = ref(null)
 
 async function handleSyncAccount(item) {
   if (syncingId.value) return
@@ -2380,6 +2382,23 @@ async function handleSyncAccount(item) {
     ElMessage.error(e?.response?.data?.detail || '同步失败')
   } finally {
     syncingId.value = null
+  }
+}
+
+async function handleSyncTemplateTags(item) {
+  if (templateSyncingId.value) return
+  templateSyncingId.value = item.id
+  try {
+    const result = await syncAccountTemplateTags(item.id)
+    const newlyBound = result?.newly_bound || 0
+    const unused = result?.unused_templates || 0
+    const used = result?.used_templates || 0
+    ElMessage.success(`已补绑 ${newlyBound} 个模板，当前 ${unused}/${used} 模板`)
+    await loadData()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '同步模板失败')
+  } finally {
+    templateSyncingId.value = null
   }
 }
 
@@ -6083,6 +6102,18 @@ onMounted(() => {
   border-color: #fcd34d;
   color: #78350f;
   background: #fef3c7;
+}
+
+.ac-btn-template-sync {
+  border-color: #bbf7d0;
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.ac-btn-template-sync:hover {
+  border-color: #86efac;
+  color: #166534;
+  background: #dcfce7;
 }
 
 .ac-btn.loading {

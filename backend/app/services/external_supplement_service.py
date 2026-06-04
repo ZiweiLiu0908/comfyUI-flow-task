@@ -969,6 +969,8 @@ async def _post_callback_pipeline(
                     tag_id=first_tag_id,
                     video_ai_template_id=tpl.id,
                 ))
+            from app.services.account_template_tag_service import ensure_account_template_tags
+            await ensure_account_template_tags(session, account_id, owner_id=owner_id)
             await session.commit()
             vs_id = vs.id
             tpl_id = tpl.id

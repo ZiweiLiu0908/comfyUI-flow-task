@@ -105,6 +105,11 @@ export async function retryKolProvision(accountId) {
   return data
 }
 
+export async function syncAccountTemplateTags(accountId) {
+  const { data } = await http.post(`/accounts/${accountId}/sync-template-tags`)
+  return data
+}
+
 // 账号-标签绑定
 export async function fetchAccountTags(accountId) {
   const { data } = await http.get(`/accounts/${accountId}/tags`)
