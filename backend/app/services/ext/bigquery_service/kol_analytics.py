@@ -143,6 +143,39 @@ def get_kol_clicks_in_window(
     return int(rows[0]["cnt"] or 0)
 
 
+def get_kol_clicks_on_eastern_day(
+    kol_user_id: str,
+    eastern_day: date,
+) -> int:
+    """
+    Count v_thirdapp_open events for a given KOL on a US/Eastern natural day.
+
+    A video published at 23:59 America/New_York should be counted against that
+    same Eastern calendar day, not a rolling 24-hour window or UTC day.
+    """
+    sql = """
+        SELECT COUNT(*) AS cnt
+        FROM decom.dwd_event_log
+        WHERE DATE(logAt_timestamp, "America/New_York") = @eastern_day
+          AND event_name = 'v_thirdapp_open'
+          AND JSON_VALUE(args, '$.sf') != ''
+          AND REGEXP_EXTRACT(prop_params, r'kolUserId=(\\d+)') = @kol_user_id
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("eastern_day", "DATE", eastern_day.isoformat()),
+            bigquery.ScalarQueryParameter("kol_user_id", "STRING", kol_user_id),
+        ]
+    )
+
+    client = get_client()
+    rows = list(client.query(sql, job_config=job_config).result())
+    if not rows:
+        return 0
+    return int(rows[0]["cnt"] or 0)
+
+
 def get_kol_daily_clicks(
     kol_user_id: str,
     start_date: date,

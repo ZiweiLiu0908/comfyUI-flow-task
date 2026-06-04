@@ -18,6 +18,7 @@ from app.db.session import SessionLocal
 logger = logging.getLogger("app.publication_metrics_scheduler")
 
 _TZ = pytz.timezone("Asia/Shanghai")
+_EASTERN_TZ = pytz.timezone("America/New_York")
 
 # 每日定时任务触发时间（北京时间，24小时制；HH, MM）
 _TRIGGER_SYNC_METRICS = (11, 30)        # 同步视频指标快照
@@ -388,22 +389,33 @@ async def _run_collect_kol_clicks() -> None:
         logger.exception("【指标同步调度器】KOL Link 点击数收集异常")
 
 
-async def collect_kol_link_clicks(db, *, publication_id=None) -> dict:
+async def collect_kol_link_clicks(
+    db,
+    *,
+    publication_id=None,
+    owner_id=None,
+    account_id=None,
+    date_from=None,
+    date_to=None,
+    platform=None,
+    force: bool = False,
+) -> dict:
     """
-    扫描 completed_at ≥ 24h 且 kol_link_clicks IS NULL 的发布记录，
-    查询 BigQuery 中 [completed_at 当天, completed_at+1天] 的 KOL Link 点击数并写回。
+    扫描发布记录，按 completed_at 对应的美东自然日查询 BigQuery KOL Link 点击数并写回。
 
+    口径：如果视频发布于 America/New_York 的某一天，即使是 23:59，
+    也统计该美东自然日 00:00:00-23:59:59 的点击量。
+
+    默认定时任务口径：只采集上一完整美东自然日且 kol_link_clicks IS NULL 的发布记录。
     publication_id: 若传入则只处理该条记录（用于手动触发单条补采）。
+    force: 为 True 时会重算并覆盖已有 kol_link_clicks。
     """
     from datetime import date as date_type
     from sqlalchemy import select
     from app.models.account import Account
     from app.models.video_publication import VideoPublication
     from app.models.video_task import VideoSubTask, VideoTask
-    from app.services.ext.bigquery_service.kol_analytics import get_kol_clicks_in_window
-
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=24)
+    from app.services.ext.bigquery_service.kol_analytics import get_kol_clicks_on_eastern_day
 
     stmt = (
         select(VideoPublication, Account.kol_user_id)
@@ -412,14 +424,56 @@ async def collect_kol_link_clicks(db, *, publication_id=None) -> dict:
         .join(Account, Account.id == VideoTask.account_id)
         .where(VideoPublication.status.in_(["completed", "partial"]))
         .where(VideoPublication.completed_at.isnot(None))
-        .where(VideoPublication.completed_at <= cutoff)
-        .where(VideoPublication.kol_link_clicks.is_(None))
         .where(Account.kol_user_id.isnot(None))
     )
+    if not force:
+        target_eastern_day = (datetime.now(_EASTERN_TZ) - timedelta(days=1)).date()
+        eastern_start = _EASTERN_TZ.localize(
+            datetime.combine(target_eastern_day, datetime.min.time())
+        ).astimezone(timezone.utc)
+        eastern_end = eastern_start + timedelta(days=1)
+        stmt = stmt.where(VideoPublication.kol_link_clicks.is_(None))
+        stmt = stmt.where(VideoPublication.completed_at >= eastern_start)
+        stmt = stmt.where(VideoPublication.completed_at < eastern_end)
     if publication_id is not None:
         stmt = stmt.where(VideoPublication.id == publication_id)
-
+    if owner_id is not None:
+        stmt = stmt.where(VideoTask.owner_id == owner_id)
+    if account_id is not None:
+        stmt = stmt.where(VideoTask.account_id == account_id)
+    if date_from is not None:
+        stmt = stmt.where(
+            VideoPublication.completed_at
+            >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        next_day = date_type.fromordinal(date_to.toordinal() + 1)
+        stmt = stmt.where(
+            VideoPublication.completed_at
+            < datetime.combine(next_day, datetime.min.time(), tzinfo=timezone.utc)
+        )
     rows = (await db.execute(stmt)).all()
+    if platform:
+        platform_lower = str(platform).lower()
+        def _has_platform(pub) -> bool:
+            status_channels = pub.channels_status or []
+            if any(
+                isinstance(ch, dict) and str(ch.get("platform") or "").lower() == platform_lower
+                for ch in status_channels
+            ):
+                return True
+            snapshot = pub.metrics_snapshot if isinstance(pub.metrics_snapshot, dict) else {}
+            metric_channels = snapshot.get("channels") or []
+            return any(
+                isinstance(ch, dict) and str(ch.get("platform") or "").lower() == platform_lower
+                for ch in metric_channels
+            )
+
+        rows = [
+            (pub, kol_user_id)
+            for pub, kol_user_id in rows
+            if _has_platform(pub)
+        ]
 
     updated = skipped = failed = 0
     loop = asyncio.get_running_loop()
@@ -429,20 +483,21 @@ async def collect_kol_link_clicks(db, *, publication_id=None) -> dict:
             skipped += 1
             continue
         try:
-            completed_day: date_type = pub.completed_at.date()
-            window_end: date_type = (pub.completed_at + timedelta(days=1)).date()
+            completed_at = pub.completed_at
+            if completed_at.tzinfo is None:
+                completed_at = completed_at.replace(tzinfo=timezone.utc)
+            eastern_day: date_type = completed_at.astimezone(_EASTERN_TZ).date()
             clicks = await loop.run_in_executor(
                 None,
-                get_kol_clicks_in_window,
+                get_kol_clicks_on_eastern_day,
                 kol_user_id,
-                completed_day,
-                window_end,
+                eastern_day,
             )
             pub.kol_link_clicks = clicks
             updated += 1
             logger.debug(
-                "【KOL点击收集】publication_id=%s kol_user_id=%s clicks=%d",
-                pub.id, kol_user_id, clicks,
+                "【KOL点击收集】publication_id=%s kol_user_id=%s eastern_day=%s clicks=%d",
+                pub.id, kol_user_id, eastern_day, clicks,
             )
         except Exception:
             logger.exception(

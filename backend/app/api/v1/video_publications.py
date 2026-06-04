@@ -447,6 +447,73 @@ async def sync_publication_metrics(
     return {"total": total, "message": f"后台同步 {total} 条视频数据中"}
 
 
+@router.post("/video-publications/sync-kol-clicks")
+async def sync_kol_link_clicks(
+    background_tasks: BackgroundTasks,
+    platform: str | None = Query(None),
+    account_id: uuid.UUID | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """按美东自然日后台重算 KOL Link 点击数。"""
+    from sqlalchemy import select, func
+    from app.db.session import SessionLocal
+    from app.models.account import Account
+    from app.models.video_publication import VideoPublication
+    from app.models.video_task import VideoSubTask, VideoTask
+    from app.services.publication_metrics_scheduler import collect_kol_link_clicks
+
+    owner_id = None if current_user.is_admin else current_user.user_id
+
+    stmt = (
+        select(func.count())
+        .select_from(VideoPublication)
+        .join(VideoSubTask, VideoSubTask.id == VideoPublication.sub_task_id)
+        .join(VideoTask, VideoTask.id == VideoSubTask.task_id)
+        .join(Account, Account.id == VideoTask.account_id)
+        .where(VideoPublication.status.in_(["completed", "partial"]))
+        .where(VideoPublication.completed_at.isnot(None))
+        .where(Account.kol_user_id.isnot(None))
+    )
+    if owner_id is not None:
+        stmt = stmt.where(VideoTask.owner_id == owner_id)
+    if account_id is not None:
+        stmt = stmt.where(VideoTask.account_id == account_id)
+    if date_from is not None:
+        from datetime import datetime, timezone
+        stmt = stmt.where(
+            VideoPublication.completed_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        from datetime import datetime, timezone
+        next_day = date.fromordinal(date_to.toordinal() + 1)
+        stmt = stmt.where(
+            VideoPublication.completed_at < datetime.combine(next_day, datetime.min.time(), tzinfo=timezone.utc)
+        )
+    total = (await db.execute(stmt)).scalar() or 0
+
+    async def _run():
+        try:
+            async with SessionLocal() as bg_db:
+                result = await collect_kol_link_clicks(
+                    bg_db,
+                    owner_id=owner_id,
+                    account_id=account_id,
+                    date_from=date_from,
+                    date_to=date_to,
+                    platform=platform,
+                    force=True,
+                )
+                logger.info("sync-kol-clicks background done: %s", result)
+        except Exception:
+            logger.exception("sync-kol-clicks background failed")
+
+    background_tasks.add_task(_run)
+    return {"total": total, "message": f"后台同步 {total} 条视频 Link 点击中"}
+
+
 @router.get("/video-publications/{publication_id}", response_model=VideoPublicationDetailRead)
 async def get_publication(
     publication_id: uuid.UUID,

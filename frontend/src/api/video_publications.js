@@ -89,6 +89,11 @@ export async function syncPublicationMetrics(params = {}) {
   return data
 }
 
+export async function syncKolLinkClicks(params = {}) {
+  const { data } = await http.post('/video-publications/sync-kol-clicks', null, { params })
+  return data
+}
+
 export async function syncAccountSnapshots(accountId) {
   const params = accountId ? { account_id: accountId } : {}
   const { data } = await http.post('/video-publications/sync-account-snapshots', null, { params })

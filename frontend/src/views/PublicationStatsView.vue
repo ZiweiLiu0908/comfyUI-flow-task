@@ -9,6 +9,11 @@
           <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:5px;vertical-align:-2px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
           {{ syncing ? '同步中...' : '同步数据' }}
         </button>
+        <button class="ps-btn ps-btn-sync" :disabled="syncingKolClicks" @click="handleSyncKolClicks">
+          <svg v-if="!syncingKolClicks" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:5px;vertical-align:-2px"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:5px;vertical-align:-2px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          {{ syncingKolClicks ? '同步中...' : '同步Link点击' }}
+        </button>
         <button class="ps-btn ps-btn-export" :disabled="exporting" @click="handleExport">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:5px;vertical-align:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           {{ exporting ? '导出中...' : '导出Excel' }}
@@ -25,7 +30,7 @@
           v-model="filters.single_date"
           type="date"
           value-format="YYYY-MM-DD"
-          placeholder="选择某一天"
+          placeholder="选择UTC日期"
           size="small"
           style="width:150px"
           @change="syncDateFiltersFromMode"
@@ -36,8 +41,8 @@
           type="daterange"
           value-format="YYYY-MM-DD"
           range-separator="至"
-          start-placeholder="开始"
-          end-placeholder="结束"
+          start-placeholder="UTC开始"
+          end-placeholder="UTC结束"
           unlink-panels
           size="small"
           style="width:260px"
@@ -377,7 +382,7 @@
           <div class="psd-card-value">{{ formatPercent(activeItem.avg_view_percentage) }}</div>
         </div>
         <div class="psd-summary-card">
-          <div class="psd-card-label">Link点击（24h）</div>
+          <div class="psd-card-label">Link点击（美东当日）</div>
           <div class="psd-card-value">{{ activeItem.kol_link_clicks ?? '—' }}</div>
         </div>
         <div class="psd-summary-card">
@@ -454,7 +459,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchAccount, fetchAccounts } from '../api/accounts'
-import { exportPublicationStats, fetchPublicationStats, syncPublicationMetrics } from '../api/video_publications'
+import { exportPublicationStats, fetchPublicationStats, syncKolLinkClicks, syncPublicationMetrics } from '../api/video_publications'
 
 const exporting = ref(false)
 
@@ -718,15 +723,15 @@ const visiblePages = computed(() => {
 })
 
 function formatYmd(date) {
-  const y = date.getFullYear()
-  const m = `${date.getMonth() + 1}`.padStart(2, '0')
-  const d = `${date.getDate()}`.padStart(2, '0')
+  const y = date.getUTCFullYear()
+  const m = `${date.getUTCMonth() + 1}`.padStart(2, '0')
+  const d = `${date.getUTCDate()}`.padStart(2, '0')
   return `${y}-${m}-${d}`
 }
 
 function shiftDays(base, days) {
   const next = new Date(base)
-  next.setDate(next.getDate() + days)
+  next.setUTCDate(next.getUTCDate() + days)
   return next
 }
 
@@ -783,10 +788,12 @@ function toggleSort(field) {
 
 function formatDateTime(value) {
   if (!value) return '-'
-  return new Date(value).toLocaleString('zh-CN', {
+  const text = new Date(value).toLocaleString('zh-CN', {
+    timeZone: 'UTC',
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })
+  return `${text} UTC`
 }
 
 function compactNumber(value) {
@@ -965,6 +972,7 @@ function changePage(page) {
 }
 
 const syncing = ref(false)
+const syncingKolClicks = ref(false)
 
 async function handleSyncMetrics() {
   if (syncing.value) return
@@ -983,6 +991,26 @@ async function handleSyncMetrics() {
     ElMessage.error(e?.response?.data?.detail || '同步失败，请稍后重试')
   } finally {
     syncing.value = false
+  }
+}
+
+async function handleSyncKolClicks() {
+  if (syncingKolClicks.value) return
+  syncingKolClicks.value = true
+  try {
+    syncDateFiltersFromMode()
+    const result = await syncKolLinkClicks({
+      platform: filters.platform || undefined,
+      account_id: filters.account_id || undefined,
+      date_from: filters.date_from || undefined,
+      date_to: filters.date_to || undefined,
+    })
+    ElMessage.success(result.message || 'Link 点击同步任务已提交')
+    await load()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || 'Link 点击同步失败，请稍后重试')
+  } finally {
+    syncingKolClicks.value = false
   }
 }
 
