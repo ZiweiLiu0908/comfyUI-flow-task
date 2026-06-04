@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import account_channel_reservations, accounts, auth, candidates, external_supplement, face_library, flags, formal_backfill, persona_tagging, settings, tags, tiktok_bloggers, topics, uploads, video_ai_templates, video_sources, video_tasks, video_task_config, video_publications
+from app.api.v1 import account_channel_reservations, accounts, auth, candidates, external_supplement, face_library, flags, formal_backfill, open_api_account_query, persona_tagging, settings, tags, tiktok_bloggers, topics, uploads, video_ai_templates, video_sources, video_tasks, video_task_config, video_publications
 from app.core.security import get_current_user
 
 api_router = APIRouter(prefix="/api/v1")
@@ -11,6 +11,7 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)       # /auth/login is public
 api_router.include_router(video_publications.router)  # Open API 代理（测试阶段无需认证）
 api_router.include_router(account_channel_reservations.router)
+api_router.include_router(open_api_account_query.router)
 api_router.include_router(external_supplement.router)  # vendor 回调，X-API-Key 自校验
 
 # ── Protected routes (Bearer token required) ──────────────────────────────────
