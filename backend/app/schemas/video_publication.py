@@ -135,6 +135,7 @@ class VideoPublicationStatsListItem(BaseModel):
     total_shares: int = 0
     avg_view_percentage: float | None = None
     kol_link_clicks: int | None = None
+    video_click_rate: float | None = None
     category_key: str | None = None
     category_label: str | None = None
     major_category: str | None = None

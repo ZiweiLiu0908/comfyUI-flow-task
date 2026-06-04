@@ -240,7 +240,9 @@
             <th class="ps-th ps-th-num">
               <button class="ps-sort-btn" @click="toggleSort('kol_link_clicks')">Link点击{{ sortMark('kol_link_clicks') }}</button>
             </th>
-            <th class="ps-th ps-th-num">视频点击率</th>
+            <th class="ps-th ps-th-num">
+              <button class="ps-sort-btn" @click="toggleSort('video_click_rate')">视频点击率{{ sortMark('video_click_rate') }}</button>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -811,6 +813,7 @@ function formatPercent(value) {
 }
 
 function videoClickRate(item) {
+  if (item?.video_click_rate != null) return `${Number(item.video_click_rate).toFixed(2)}%`
   const clicks = item?.kol_link_clicks
   const views = item?.total_views
   if (clicks == null || !views) return '—'

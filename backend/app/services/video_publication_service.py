@@ -1909,6 +1909,12 @@ class VideoPublicationService:
         if key == "account_name":
             col = Account.account_name
             return (col.desc().nullslast() if desc else col.asc().nullslast(),)
+        if key == "kol_link_clicks":
+            col = VideoPublication.kol_link_clicks
+            return (
+                col.desc().nullslast() if desc else col.asc().nullslast(),
+                VideoPublication.completed_at.desc().nullslast(),
+            )
         # title 在 request_payload JSON 中、metric 类排序需聚合 metrics_snapshot；都不下推
         return None
 
@@ -1964,6 +1970,10 @@ class VideoPublicationService:
             if avg_view_percentage is not None:
                 view_percentage_values.append(avg_view_percentage)
 
+        video_click_rate = None
+        if publication.kol_link_clicks is not None and total_views > 0:
+            video_click_rate = publication.kol_link_clicks / total_views * 100
+
         return VideoPublicationStatsListItem(
             id=publication.id,
             sub_task_id=publication.sub_task_id,
@@ -1988,6 +1998,7 @@ class VideoPublicationService:
             total_shares=total_shares,
             avg_view_percentage=(sum(view_percentage_values) / len(view_percentage_values)) if view_percentage_values else None,
             kol_link_clicks=publication.kol_link_clicks,
+            video_click_rate=video_click_rate,
             category_key=getattr(classification, "category_key", None),
             category_label=_classification_label(classification),
             major_category=getattr(classification, "major_category", None),
@@ -2065,6 +2076,10 @@ class VideoPublicationService:
                 return item.total_shares
             if key_name == "avg_view_percentage":
                 return item.avg_view_percentage if item.avg_view_percentage is not None else -1
+            if key_name == "kol_link_clicks":
+                return item.kol_link_clicks if item.kol_link_clicks is not None else -1
+            if key_name == "video_click_rate":
+                return item.video_click_rate if item.video_click_rate is not None else -1
             return item.published_at or item.created_at or datetime.min.replace(tzinfo=timezone.utc)
 
         return sorted(items, key=key, reverse=reverse)
