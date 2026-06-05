@@ -615,7 +615,7 @@
     <el-dialog
       v-model="showScheduledGenerationDialog"
       title="定时一键生成"
-      width="620px"
+      width="860px"
       :close-on-click-modal="false"
     >
       <div class="al-supplement-body">
@@ -673,20 +673,56 @@
           <div class="al-supplement-config">
             <div class="al-supplement-config-label">大类重提规则</div>
             <div class="al-scheduled-rule-list">
-              <div v-for="major in RANKABLE_MAJOR_KEYS" :key="major" class="al-scheduled-rule-row">
-                <div class="al-scheduled-rule-name">
-                  <span :class="`al-supplement-major-dot is-${major}`"></span>
-                  <span>{{ MAJOR_LABEL_MAP[major] }}</span>
+              <div v-for="major in RANKABLE_MAJOR_KEYS" :key="major" class="al-scheduled-rule-group">
+                <div class="al-scheduled-rule-group-head">
+                  <div class="al-scheduled-rule-name">
+                    <span :class="`al-supplement-major-dot is-${major}`"></span>
+                    <span>{{ MAJOR_LABEL_MAP[major] }}</span>
+                  </div>
+                  <el-switch v-model="scheduledGenerationForm.categoryRules[major].enabled" />
+                  <button type="button" class="al-scheduled-tier-add" @click="addScheduledGenerationTier(major)">新增区间</button>
                 </div>
-                <el-switch v-model="scheduledGenerationForm.categoryRules[major].enabled" />
-                <div class="al-scheduled-rule-field">
-                  <span>播放量 &gt;</span>
-                  <el-input-number v-model="scheduledGenerationForm.categoryRules[major].min_views" :min="0" :step="1000" controls-position="right" style="width:140px" />
-                </div>
-                <div class="al-scheduled-rule-field">
-                  <span>重提</span>
-                  <el-input-number v-model="scheduledGenerationForm.categoryRules[major].repeat_count" :min="1" :max="20" controls-position="right" style="width:110px" />
-                  <span>次</span>
+                <div v-if="scheduledGenerationForm.categoryRules[major].enabled" class="al-scheduled-tier-table">
+                  <div class="al-scheduled-tier-head">
+                    <span>档位</span>
+                    <span>最小播放量</span>
+                    <span>最大播放量</span>
+                    <span>重提次数</span>
+                    <span></span>
+                  </div>
+                  <div
+                    v-for="(tier, tierIndex) in scheduledGenerationForm.categoryRules[major].tiers"
+                    :key="`${major}-${tierIndex}`"
+                    class="al-scheduled-tier-row"
+                  >
+                    <el-input v-model="tier.label" placeholder="小爆" maxlength="20" />
+                    <el-input-number v-model="tier.min_views" :min="0" :step="1000" controls-position="right" />
+                    <div class="al-scheduled-tier-max">
+                      <el-input-number
+                        v-model="tier.max_views"
+                        :disabled="tier.max_views === null"
+                        :min="0"
+                        :step="1000"
+                        controls-position="right"
+                      />
+                      <el-checkbox
+                        :model-value="tier.max_views === null"
+                        @change="setScheduledGenerationTierOpenEnded(major, tierIndex, $event)"
+                      >无上限</el-checkbox>
+                    </div>
+                    <el-input-number v-model="tier.repeat_count" :min="0" :max="50" controls-position="right" />
+                    <button
+                      type="button"
+                      class="al-scheduled-tier-remove"
+                      :disabled="scheduledGenerationForm.categoryRules[major].tiers.length <= 1"
+                      @click="removeScheduledGenerationTier(major, tierIndex)"
+                    >删除</button>
+                  </div>
+                  <el-input
+                    v-model="scheduledGenerationForm.categoryRules[major].reuse_note"
+                    class="al-scheduled-reuse-note"
+                    placeholder="复用重点，例如：保持原有 prompt，换音乐、衣服"
+                  />
                 </div>
               </div>
             </div>
@@ -4020,17 +4056,128 @@ const scheduledGenerationPresets = [
 const scheduledGenerationMajorKeys = ['beauty', 'method', 'shopping', 'lifestyle', 'drama']
 const showScheduledGenerationDialog = ref(false)
 const scheduledGenerationSaving = ref(false)
+const DEFAULT_SCHEDULED_GENERATION_TIERS = [
+  { label: '小爆', min_views: 5000, max_views: 10000, repeat_count: 3 },
+  { label: '中爆', min_views: 10000, max_views: 100000, repeat_count: 5 },
+  { label: '大爆', min_views: 100000, max_views: 500000, repeat_count: 10 },
+  { label: '超级爆', min_views: 500000, max_views: null, repeat_count: 15 },
+]
+
+function toNonNegativeInt(value, fallback = 0) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(Math.trunc(parsed), 0)
+}
+
+function cloneScheduledGenerationTier(tier) {
+  return {
+    label: String(tier?.label || '').trim() || '自定义',
+    min_views: toNonNegativeInt(tier?.min_views, 0),
+    max_views: tier?.max_views === null || tier?.max_views === undefined || tier?.max_views === ''
+      ? null
+      : toNonNegativeInt(tier.max_views, 0),
+    repeat_count: toNonNegativeInt(tier?.repeat_count, 0),
+  }
+}
+
+function defaultScheduledGenerationTiers() {
+  return DEFAULT_SCHEDULED_GENERATION_TIERS.map(cloneScheduledGenerationTier)
+}
 
 function buildScheduledGenerationRules(raw = {}) {
   return scheduledGenerationMajorKeys.reduce((acc, major) => {
     const item = raw?.[major] || {}
+    let tiers = []
+    if (Array.isArray(item.tiers) && item.tiers.length > 0) {
+      tiers = item.tiers.map(cloneScheduledGenerationTier)
+    } else if (item.min_views !== undefined || item.repeat_count !== undefined) {
+      tiers = [{
+        label: '旧规则',
+        min_views: toNonNegativeInt(item.min_views, 5000),
+        max_views: null,
+        repeat_count: toNonNegativeInt(item.repeat_count, 3),
+      }]
+    } else {
+      tiers = defaultScheduledGenerationTiers()
+    }
     acc[major] = {
       enabled: Boolean(item.enabled),
-      min_views: Number(item.min_views ?? 5000),
-      repeat_count: Number(item.repeat_count ?? 3),
+      tiers,
+      reuse_note: item.reuse_note || '',
     }
     return acc
   }, {})
+}
+
+function addScheduledGenerationTier(major) {
+  const rule = scheduledGenerationForm.value.categoryRules[major]
+  const previous = rule.tiers?.[rule.tiers.length - 1]
+  const start = previous?.max_views ?? ((previous?.min_views ?? 0) + 10000)
+  rule.tiers.push({
+    label: '自定义',
+    min_views: toNonNegativeInt(start, 0),
+    max_views: null,
+    repeat_count: 1,
+  })
+}
+
+function removeScheduledGenerationTier(major, tierIndex) {
+  const tiers = scheduledGenerationForm.value.categoryRules[major].tiers || []
+  if (tiers.length <= 1) return
+  tiers.splice(tierIndex, 1)
+}
+
+function setScheduledGenerationTierOpenEnded(major, tierIndex, checked) {
+  const tier = scheduledGenerationForm.value.categoryRules[major].tiers?.[tierIndex]
+  if (!tier) return
+  tier.max_views = checked ? null : toNonNegativeInt(tier.min_views, 0) + 10000
+}
+
+function sanitizeScheduledGenerationRules(rules) {
+  return scheduledGenerationMajorKeys.reduce((acc, major) => {
+    const rule = rules?.[major] || {}
+    const tiers = Array.isArray(rule.tiers) && rule.tiers.length > 0
+      ? rule.tiers.map(cloneScheduledGenerationTier)
+      : defaultScheduledGenerationTiers()
+    tiers.sort((a, b) => a.min_views - b.min_views)
+    acc[major] = {
+      enabled: Boolean(rule.enabled),
+      tiers,
+      reuse_note: String(rule.reuse_note || '').trim(),
+    }
+    return acc
+  }, {})
+}
+
+function validateScheduledGenerationRules(rules) {
+  for (const major of scheduledGenerationMajorKeys) {
+    const label = MAJOR_LABEL_MAP[major] || major
+    const rule = rules?.[major]
+    if (!rule?.enabled) continue
+    const tiers = Array.isArray(rule.tiers) ? rule.tiers.map(cloneScheduledGenerationTier) : []
+    if (tiers.length === 0) return `${label} 至少需要一个播放量区间`
+    for (const tier of tiers) {
+      if (tier.max_views !== null && tier.max_views <= tier.min_views) {
+        return `${label}「${tier.label}」最大播放量必须大于最小播放量`
+      }
+      if (tier.repeat_count < 0) {
+        return `${label}「${tier.label}」重提次数不能小于 0`
+      }
+    }
+    const sorted = [...tiers].sort((a, b) => a.min_views - b.min_views)
+    const openEndedIndex = sorted.findIndex(tier => tier.max_views === null)
+    if (openEndedIndex !== -1 && openEndedIndex !== sorted.length - 1) {
+      return `${label} 无上限区间只能是最后一档`
+    }
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const currentEnd = sorted[i].max_views ?? Number.POSITIVE_INFINITY
+      const nextStart = sorted[i + 1].min_views
+      if (currentEnd > nextStart) {
+        return `${label} 播放量区间不能重叠`
+      }
+    }
+  }
+  return ''
 }
 
 const scheduledGenerationForm = ref({
@@ -4182,9 +4329,15 @@ async function openScheduledGenerationDialog() {
 
 async function saveScheduledGenerationConfig() {
   if (scheduledGenerationSaving.value) return
+  const validationError = validateScheduledGenerationRules(scheduledGenerationForm.value.categoryRules)
+  if (validationError) {
+    ElMessage.warning(validationError)
+    return
+  }
   scheduledGenerationSaving.value = true
   try {
     const { scheduleScope } = buildCurrentAccountScope()
+    const categoryRules = sanitizeScheduledGenerationRules(scheduledGenerationForm.value.categoryRules)
     await updateScheduledGenerationConfig({
       scheduled_generation_enabled: scheduledGenerationForm.value.enabled,
       scheduled_generation_cron: scheduledGenerationForm.value.cron || '0 10 * * *',
@@ -4193,7 +4346,7 @@ async function saveScheduledGenerationConfig() {
       scheduled_generation_subtask_count: scheduledGenerationForm.value.subtaskCount || 1,
       scheduled_generation_unused_template_months: scheduledGenerationForm.value.unusedTemplateMonths || 3,
       scheduled_generation_used_template_cooldown_days: scheduledGenerationForm.value.usedTemplateCooldownDays ?? 30,
-      scheduled_generation_category_rules: scheduledGenerationForm.value.categoryRules,
+      scheduled_generation_category_rules: categoryRules,
       scheduled_generation_scope_mode: scheduleScope.scope_mode,
       scheduled_generation_scope_account_ids: scheduleScope.scope_account_ids,
       scheduled_generation_scope_filters: scheduleScope.scope_filters,
@@ -7066,43 +7219,105 @@ onMounted(() => {
 .al-scheduled-rule-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
   width: 100%;
 }
 
-.al-scheduled-rule-row {
-  display: grid;
-  grid-template-columns: minmax(110px, 1fr) 56px minmax(190px, 220px) minmax(150px, 170px);
-  align-items: center;
+.al-scheduled-rule-group {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  min-height: 38px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eef2f7;
 }
 
-.al-scheduled-rule-name,
-.al-scheduled-rule-field {
+.al-scheduled-rule-group:last-child {
+  border-bottom: none;
+}
+
+.al-scheduled-rule-group-head {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 56px auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.al-scheduled-rule-name {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
   font-size: 12px;
-  color: #475569;
-}
-
-.al-scheduled-rule-name {
   font-weight: 600;
   color: #334155;
 }
 
-.al-scheduled-rule-field span {
-  flex-shrink: 0;
+.al-scheduled-tier-add,
+.al-scheduled-tier-remove {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #c7d2fe;
+  border-radius: 7px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.al-scheduled-tier-remove {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+.al-scheduled-tier-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.al-scheduled-tier-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.al-scheduled-tier-head,
+.al-scheduled-tier-row {
+  display: grid;
+  grid-template-columns: 110px 150px minmax(190px, 1fr) 120px 56px;
+  align-items: center;
+  gap: 8px;
+}
+
+.al-scheduled-tier-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  padding: 0 2px;
+}
+
+.al-scheduled-tier-max {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 70px;
+  align-items: center;
+  gap: 8px;
+}
+
+.al-scheduled-reuse-note {
+  margin-top: 2px;
 }
 
 @media (max-width: 720px) {
-  .al-scheduled-rule-row {
+  .al-scheduled-rule-group-head,
+  .al-scheduled-tier-head,
+  .al-scheduled-tier-row {
     grid-template-columns: 1fr;
     gap: 8px;
     align-items: flex-start;
   }
+  .al-scheduled-tier-head { display: none; }
+  .al-scheduled-tier-max { grid-template-columns: 1fr; }
 }
 
 .al-supplement-types {

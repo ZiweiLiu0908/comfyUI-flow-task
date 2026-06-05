@@ -15,6 +15,9 @@ class CategoryRuleMatch:
     major_category: str
     min_views: int
     repeat_count: int
+    max_views: int | None = None
+    rule_label: str | None = None
+    rule_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -123,16 +126,60 @@ def match_category_rule(
     rule = category_rules.get(str(major_category))
     if not isinstance(rule, dict) or not rule.get("enabled"):
         return None
+    views = _to_int(total_views)
+    tier_matches: list[CategoryRuleMatch] = []
+    if isinstance(rule.get("tiers"), list):
+        for raw_tier in rule.get("tiers") or []:
+            if not isinstance(raw_tier, dict):
+                continue
+            min_views = max(_to_int(raw_tier.get("min_views")), 0)
+            max_raw = raw_tier.get("max_views")
+            max_views = None if max_raw in (None, "") else max(_to_int(max_raw), 0)
+            repeat_count = max(_to_int(raw_tier.get("repeat_count")), 0)
+            if repeat_count <= 0:
+                continue
+            if max_views is not None and max_views <= min_views:
+                continue
+            if views < min_views:
+                continue
+            if max_views is not None and views >= max_views:
+                continue
+            label = str(raw_tier.get("label") or "").strip() or None
+            snapshot = {
+                "label": label,
+                "min_views": min_views,
+                "max_views": max_views,
+                "repeat_count": repeat_count,
+            }
+            if rule.get("reuse_note"):
+                snapshot["reuse_note"] = rule.get("reuse_note")
+            tier_matches.append(CategoryRuleMatch(
+                major_category=str(major_category),
+                min_views=min_views,
+                max_views=max_views,
+                repeat_count=repeat_count,
+                rule_label=label,
+                rule_snapshot=snapshot,
+            ))
+        if tier_matches:
+            return max(tier_matches, key=lambda match: match.min_views)
+        return None
+
     min_views = max(_to_int(rule.get("min_views")), 0)
     repeat_count = max(_to_int(rule.get("repeat_count")), 0)
     if repeat_count <= 0:
         return None
-    if _to_int(total_views) <= min_views:
+    if views <= min_views:
         return None
     return CategoryRuleMatch(
         major_category=str(major_category),
         min_views=min_views,
         repeat_count=repeat_count,
+        rule_snapshot={
+            "min_views": min_views,
+            "max_views": None,
+            "repeat_count": repeat_count,
+        },
     )
 
 
@@ -537,6 +584,10 @@ async def _step_one_republish(
                 major_category=major_category,
                 total_views=views,
                 threshold_views=match.min_views,
+                matched_rule_label=match.rule_label,
+                threshold_min_views=match.min_views,
+                threshold_max_views=match.max_views,
+                matched_rule_snapshot=match.rule_snapshot,
                 repeat_count=match.repeat_count,
                 subtask_count=subtask_count,
                 created_task_ids=created_task_ids,
