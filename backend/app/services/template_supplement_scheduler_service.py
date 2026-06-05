@@ -12,14 +12,13 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
-from sqlalchemy import exists, select
+from sqlalchemy import select
 
 from app.db.session import SessionLocal
-from app.models.account import Account
-from app.models.account_blogger_binding import AccountBloggerBinding
 from app.models.external_supplement_request import ExternalSupplementRequest
 from app.models.pipeline_setting import PipelineSetting
 from app.models.template_supplement_run import TemplateSupplementRun
+from app.services.account_scope_service import normalize_schedule_scope, resolve_schedule_scope_accounts
 from app.services.template_supplement_service import (
     build_account_top_up_plan,
     resolve_supplement_mode_for_account,
@@ -146,6 +145,9 @@ async def _process_owner(ps: PipelineSetting, *, now_utc: datetime, now_local: d
         target_unused_template_count=max(int(ps.template_supplement_target_unused_count or 10), 1),
         filters=ps.template_supplement_filters or {},
         max_rounds=max(int(ps.template_supplement_max_rounds or 2), 1),
+        scope_mode=ps.template_supplement_scope_mode or "filtered",
+        scope_account_ids=ps.template_supplement_scope_account_ids or [],
+        scope_filters=ps.template_supplement_scope_filters or {},
     )
 
 
@@ -156,17 +158,24 @@ async def run_scheduled_template_supplement_for_owner(
     target_unused_template_count: int,
     filters: dict,
     max_rounds: int,
+    scope_mode: str | None = None,
+    scope_account_ids: list | None = None,
+    scope_filters: dict | None = None,
 ) -> None:
+    scope = normalize_schedule_scope(
+        scope_mode=scope_mode,
+        account_ids=scope_account_ids,
+        filters=scope_filters,
+    )
     async with SessionLocal() as session:
-        accounts = list((await session.execute(
-            select(Account)
-            .where(Account.owner_id == owner_id)
-            .where(
-                exists().where(
-                    AccountBloggerBinding.account_id == Account.id,
-                )
-            )
-        )).scalars().all())
+        accounts = await resolve_schedule_scope_accounts(
+            session,
+            owner_id=owner_id,
+            scope_mode=scope["mode"],
+            account_ids=scope["account_ids"],
+            filters=scope["filters"],
+            require_channel_bound=False,
+        )
 
     for account in accounts:
         mode = resolve_supplement_mode_for_account(account)
@@ -178,6 +187,8 @@ async def run_scheduled_template_supplement_for_owner(
             target_unused_template_count=target_unused_template_count,
             filters=filters,
             max_rounds=max_rounds,
+            scope=scope,
+            resolved_account_count=len(accounts),
         )
         asyncio.create_task(_start_round_for_run(run_id, round_index=1))
 
@@ -191,6 +202,8 @@ async def _create_scheduled_run(
     target_unused_template_count: int,
     filters: dict,
     max_rounds: int,
+    scope: dict,
+    resolved_account_count: int,
 ) -> uuid.UUID:
     async with SessionLocal() as session:
         plan = await build_account_top_up_plan(
@@ -214,6 +227,10 @@ async def _create_scheduled_run(
             completed_rounds=0,
             max_rounds=max_rounds,
             filters=filters or {},
+            scope_mode=scope["mode"],
+            scope_account_ids_snapshot=scope["account_ids"],
+            scope_filters_snapshot=scope["filters"],
+            resolved_account_count=resolved_account_count,
             skip_reason=plan.skip_reason or ("已达目标" if plan.need_count <= 0 else None),
         )
         session.add(run)

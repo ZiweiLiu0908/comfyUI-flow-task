@@ -136,6 +136,9 @@ class PipelineSetting(Base):
     template_supplement_target_unused_count: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     template_supplement_filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     template_supplement_max_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    template_supplement_scope_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="filtered")
+    template_supplement_scope_account_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    template_supplement_scope_filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     template_supplement_last_trigger_key: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # 定时一键生成（北京时间 cron）
     scheduled_generation_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
@@ -146,6 +149,9 @@ class PipelineSetting(Base):
     scheduled_generation_unused_template_months: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     scheduled_generation_used_template_cooldown_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     scheduled_generation_category_rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    scheduled_generation_scope_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="filtered")
+    scheduled_generation_scope_account_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    scheduled_generation_scope_filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     scheduled_generation_last_trigger_key: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # 人脸选择配置
     face_select_model: Mapped[str] = mapped_column(String(200), nullable=False, default="gemini-3.1-pro-preview")

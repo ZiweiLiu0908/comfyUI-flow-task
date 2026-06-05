@@ -899,6 +899,7 @@ class BulkScheduledPublishFilters(BaseModel):
     classification_type: str | None = None
     category_keys: list[str] | None = None
     flag_id: uuid.UUID | None = None
+    search: str | None = None
 
 
 class BulkScheduledPublishBody(BaseModel):
@@ -932,6 +933,7 @@ async def bulk_update_scheduled_publish(
                 classification_type=f.classification_type,
                 category_keys=f.category_keys,
                 flag_id=f.flag_id,
+                search=f.search,
             )
             account_ids = [a.id for a in all_accounts]
         if not account_ids:
@@ -1682,6 +1684,7 @@ class AccountListFilters(BaseModel):
     classification_type: str | None = None
     category_keys: list[str] | None = None
     flag_id: uuid.UUID | None = None
+    search: str | None = None
 
 
 class BulkGenerateVideoTasksBody(BaseModel):
@@ -2080,6 +2083,7 @@ async def bulk_generate_video_tasks(
                 classification_type=f.classification_type,
                 category_keys=f.category_keys,
                 flag_id=f.flag_id,
+                search=f.search,
             )
             account_ids = [a.id for a in all_accounts]
         if not account_ids:
@@ -2173,6 +2177,7 @@ async def _resolve_account_ids(
             classification_type=f.classification_type,
             category_keys=f.category_keys,
             flag_id=f.flag_id,
+            search=f.search,
         )
         return [a.id for a in accounts]
     return []

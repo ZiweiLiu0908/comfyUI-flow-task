@@ -25,7 +25,7 @@
         </el-button>
         <el-button class="al-schedule-btn" :disabled="total === 0" @click="openScheduledGenerationDialog">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M8 12h4"/></svg>
-          定时生成
+          {{ selectedMap.size > 0 ? `定时生成 (${selectedMap.size})` : '定时生成' }}
         </el-button>
         <el-button class="al-schedule-btn" :disabled="total === 0" @click="openBulkScheduleDialog">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -37,7 +37,7 @@
         </el-button>
         <el-button class="al-supplement-btn" :disabled="total === 0" @click="openSupplementScheduleDialog">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="margin-right:6px"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          定时补充
+          {{ selectedMap.size > 0 ? `定时补充 (${selectedMap.size})` : '定时补充' }}
         </el-button>
         <el-button class="al-namehandle-btn" :loading="bulkNameHandleLoading" :disabled="total === 0" @click="confirmBulkNameHandle">
           <svg v-if="!bulkNameHandleLoading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:6px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -621,7 +621,7 @@
       <div class="al-supplement-body">
         <div class="al-supplement-scope">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span>仅处理已绑定 TikTok 博主的 AI 博主</span>
+          <span>{{ scheduleScopeText }}，仅处理已绑定 TikTok 博主的 AI 博主</span>
         </div>
         <div class="al-supplement-config">
           <div class="al-supplement-config-row" style="justify-content:space-between">
@@ -859,7 +859,7 @@
       <div class="al-supplement-body">
         <div class="al-supplement-scope">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span>仅处理已绑定 TikTok 博主的 AI 博主</span>
+          <span>{{ scheduleScopeText }}，仅处理已绑定 TikTok 博主的 AI 博主</span>
         </div>
         <div class="al-supplement-config">
           <div class="al-supplement-config-row" style="justify-content:space-between">
@@ -3845,6 +3845,51 @@ const bulkVideoGenProgress = ref({ current: 0, total: 0 })
 const showBulkGenDialog = ref(false)
 const bulkGenForm = ref({ mode: 'unused', fill_mode: 'count', limit: 5, subtaskCount: 1 })
 
+const scheduleScopeText = computed(() => (
+  selectedMap.value.size > 0
+    ? `将作用于已选 ${selectedMap.value.size} 个账号`
+    : `将作用于当前筛选结果 ${total.value} 个账号`
+))
+
+function buildCurrentAccountListFilters() {
+  const filters = {}
+  if (filterGender.value) filters.gender = filterGender.value
+  if (filterAccountType.value) filters.account_type = filterAccountType.value
+  if (filterFaceMode.value) filters.face_mode = filterFaceMode.value
+  if (filterProductCodeMode.value) filters.product_code_mode = filterProductCodeMode.value
+  if (filterAccountTier.value) filters.account_tier = filterAccountTier.value
+  if (filterPlatformBindingStatus.value) filters.platform_binding_status = filterPlatformBindingStatus.value
+  if (filterClassificationType.value) filters.classification_type = filterClassificationType.value
+  if (filterCategoryIndices.value.length > 0) filters.category_keys = [...filterCategoryIndices.value]
+  if (filterFlagId.value) filters.flag_id = filterFlagId.value
+  if (searchQuery.value.trim()) filters.search = searchQuery.value.trim()
+  return filters
+}
+
+function buildCurrentAccountScope() {
+  if (selectedMap.value.size > 0) {
+    return {
+      accountIds: [...selectedMap.value.keys()],
+      filters: null,
+      scheduleScope: {
+        scope_mode: 'selected',
+        scope_account_ids: [...selectedMap.value.keys()],
+        scope_filters: {},
+      },
+    }
+  }
+  const filters = buildCurrentAccountListFilters()
+  return {
+    accountIds: [],
+    filters,
+    scheduleScope: {
+      scope_mode: 'filtered',
+      scope_account_ids: [],
+      scope_filters: filters,
+    },
+  }
+}
+
 
 function handleBulkVideoGenerate() {
   if (bulkVideoGenerating.value) return
@@ -3862,25 +3907,7 @@ async function startBulkVideoGenerate() {
   bulkVideoGenerating.value = true
 
   try {
-    const isSelection = selectedMap.value.size > 0
-    let accountIds = []
-    let filters = null
-
-    if (isSelection) {
-      accountIds = [...selectedMap.value.values()].map(a => a.id)
-    } else {
-      filters = {}
-      if (filterGender.value) filters.gender = filterGender.value
-      if (filterAccountType.value) filters.account_type = filterAccountType.value
-      if (filterFaceMode.value) filters.face_mode = filterFaceMode.value
-      if (filterProductCodeMode.value) filters.product_code_mode = filterProductCodeMode.value
-      if (filterAccountTier.value) filters.account_tier = filterAccountTier.value
-      if (filterPlatformBindingStatus.value) filters.platform_binding_status = filterPlatformBindingStatus.value
-      if (filterClassificationType.value) filters.classification_type = filterClassificationType.value
-      if (filterCategoryIndices.value.length > 0) filters.category_keys = filterCategoryIndices.value
-      if (filterFlagId.value) filters.flag_id = filterFlagId.value
-      if (searchQuery.value.trim()) filters.search = searchQuery.value.trim()
-    }
+    const { accountIds, filters } = buildCurrentAccountScope()
 
     const result = await bulkGenerateVideoTasks(accountIds, mode, limit, bulkGenForm.value.subtaskCount, fill_mode, filters)
     const skipMsg = result.skipped_accounts > 0 ? `，${result.skipped_accounts} 个账号无可用模板` : ''
@@ -3936,22 +3963,7 @@ async function handleBulkSchedule() {
 
   savingBulkSchedule.value = true
 
-  const isSelection = selectedMap.value.size > 0
-  const accountIds = isSelection ? [...selectedMap.value.values()].map(a => a.id) : []
-  let filters = null
-  if (!isSelection) {
-    filters = {}
-    if (filterGender.value) filters.gender = filterGender.value
-    if (filterAccountType.value) filters.account_type = filterAccountType.value
-    if (filterFaceMode.value) filters.face_mode = filterFaceMode.value
-    if (filterProductCodeMode.value) filters.product_code_mode = filterProductCodeMode.value
-    if (filterAccountTier.value) filters.account_tier = filterAccountTier.value
-    if (filterPlatformBindingStatus.value) filters.platform_binding_status = filterPlatformBindingStatus.value
-    if (filterClassificationType.value) filters.classification_type = filterClassificationType.value
-    if (filterCategoryIndices.value.length > 0) filters.category_keys = filterCategoryIndices.value
-    if (filterFlagId.value) filters.flag_id = filterFlagId.value
-    if (searchQuery.value.trim()) filters.search = searchQuery.value.trim()
-  }
+  const { accountIds, filters } = buildCurrentAccountScope()
 
   try {
     const result = await bulkUpdateScheduledPublish(accountIds, {
@@ -4075,20 +4087,7 @@ async function handleSupplement() {
   if (supplementing.value) return
   supplementing.value = true
 
-  const isSelection = selectedMap.value.size > 0
-  const accountIds = isSelection ? [...selectedMap.value.keys()] : []
-  let accountListFilters = null
-  if (!isSelection) {
-    accountListFilters = {}
-    if (filterGender.value) accountListFilters.gender = filterGender.value
-    if (filterAccountType.value) accountListFilters.account_type = filterAccountType.value
-    if (filterFaceMode.value) accountListFilters.face_mode = filterFaceMode.value
-    if (filterProductCodeMode.value) accountListFilters.product_code_mode = filterProductCodeMode.value
-    if (filterAccountTier.value) accountListFilters.account_tier = filterAccountTier.value
-    if (filterPlatformBindingStatus.value) accountListFilters.platform_binding_status = filterPlatformBindingStatus.value
-    if (filterClassificationType.value) accountListFilters.classification_type = filterClassificationType.value
-    if (filterCategoryIndices.value.length > 0) accountListFilters.category_keys = filterCategoryIndices.value
-  }
+  const { accountIds, filters: accountListFilters } = buildCurrentAccountScope()
 
   // shared 模式不使用弹窗过滤条件（走内部 pipeline_settings 默认）
   const filters = supplementForm.value.templateType === 'shared'
@@ -4142,12 +4141,16 @@ async function saveSupplementSchedule() {
   if (supplementScheduleSaving.value) return
   supplementScheduleSaving.value = true
   try {
+    const { scheduleScope } = buildCurrentAccountScope()
     await updateTemplateSupplementConfig({
       template_supplement_schedule_enabled: supplementScheduleForm.value.enabled,
       template_supplement_schedule_cron: supplementScheduleForm.value.cron || '0 10 * * *',
       template_supplement_target_unused_count: supplementScheduleForm.value.targetUnusedTemplateCount,
       template_supplement_filters: buildSupplementFiltersFromForm(supplementScheduleForm.value, true),
       template_supplement_max_rounds: supplementScheduleForm.value.maxRounds || 2,
+      template_supplement_scope_mode: scheduleScope.scope_mode,
+      template_supplement_scope_account_ids: scheduleScope.scope_account_ids,
+      template_supplement_scope_filters: scheduleScope.scope_filters,
     })
     showSupplementScheduleDialog.value = false
     ElMessage.success(supplementScheduleForm.value.enabled ? '定时补充已启用' : '定时补充已关闭')
@@ -4181,6 +4184,7 @@ async function saveScheduledGenerationConfig() {
   if (scheduledGenerationSaving.value) return
   scheduledGenerationSaving.value = true
   try {
+    const { scheduleScope } = buildCurrentAccountScope()
     await updateScheduledGenerationConfig({
       scheduled_generation_enabled: scheduledGenerationForm.value.enabled,
       scheduled_generation_cron: scheduledGenerationForm.value.cron || '0 10 * * *',
@@ -4190,6 +4194,9 @@ async function saveScheduledGenerationConfig() {
       scheduled_generation_unused_template_months: scheduledGenerationForm.value.unusedTemplateMonths || 3,
       scheduled_generation_used_template_cooldown_days: scheduledGenerationForm.value.usedTemplateCooldownDays ?? 30,
       scheduled_generation_category_rules: scheduledGenerationForm.value.categoryRules,
+      scheduled_generation_scope_mode: scheduleScope.scope_mode,
+      scheduled_generation_scope_account_ids: scheduleScope.scope_account_ids,
+      scheduled_generation_scope_filters: scheduleScope.scope_filters,
     })
     showScheduledGenerationDialog.value = false
     ElMessage.success(scheduledGenerationForm.value.enabled ? '定时生成已启用' : '定时生成已关闭')

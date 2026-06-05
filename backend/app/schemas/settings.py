@@ -28,6 +28,9 @@ class TemplateSupplementConfigPayload(BaseModel):
     template_supplement_target_unused_count: int = 10
     template_supplement_filters: dict = Field(default_factory=dict)
     template_supplement_max_rounds: int = 2
+    template_supplement_scope_mode: str = "filtered"
+    template_supplement_scope_account_ids: list[str] = Field(default_factory=list)
+    template_supplement_scope_filters: dict = Field(default_factory=dict)
 
 
 class ScheduledGenerationConfigPayload(BaseModel):
@@ -39,6 +42,9 @@ class ScheduledGenerationConfigPayload(BaseModel):
     scheduled_generation_unused_template_months: int = 3
     scheduled_generation_used_template_cooldown_days: int = 30
     scheduled_generation_category_rules: dict = Field(default_factory=dict)
+    scheduled_generation_scope_mode: str = "filtered"
+    scheduled_generation_scope_account_ids: list[str] = Field(default_factory=list)
+    scheduled_generation_scope_filters: dict = Field(default_factory=dict)
 
 
 class CandidateSearchPayload(BaseModel):

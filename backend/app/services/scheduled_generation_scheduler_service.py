@@ -138,5 +138,8 @@ async def _process_owner(row: PipelineSetting, *, now_utc: datetime, now_local: 
                 "unused_template_months": row.scheduled_generation_unused_template_months or 3,
                 "used_template_cooldown_days": row.scheduled_generation_used_template_cooldown_days or 30,
                 "category_rules": row.scheduled_generation_category_rules or {},
+                "scope_mode": row.scheduled_generation_scope_mode or "filtered",
+                "scope_account_ids": row.scheduled_generation_scope_account_ids or [],
+                "scope_filters": row.scheduled_generation_scope_filters or {},
             },
         )

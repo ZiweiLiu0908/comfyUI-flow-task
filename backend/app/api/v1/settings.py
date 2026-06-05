@@ -21,6 +21,7 @@ from app.schemas.topic import KeywordGenConfigPayload
 from app.services.channel_status_poller import run_channel_status_check
 from app.services.channel_name_sync_scheduler import run_channel_name_sync
 from app.services.pipeline_settings_service import get_or_create_pipeline_settings, update_pipeline_settings
+from app.services.account_scope_service import normalize_schedule_scope
 from app.services.system_settings_service import get_or_create_system_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -240,6 +241,9 @@ async def get_scheduled_generation_config(
         scheduled_generation_unused_template_months=row.scheduled_generation_unused_template_months or 3,
         scheduled_generation_used_template_cooldown_days=row.scheduled_generation_used_template_cooldown_days or 30,
         scheduled_generation_category_rules=row.scheduled_generation_category_rules or {},
+        scheduled_generation_scope_mode=row.scheduled_generation_scope_mode or "filtered",
+        scheduled_generation_scope_account_ids=row.scheduled_generation_scope_account_ids or [],
+        scheduled_generation_scope_filters=row.scheduled_generation_scope_filters or {},
     )
 
 
@@ -258,6 +262,14 @@ async def put_scheduled_generation_config(
     row.scheduled_generation_unused_template_months = max(int(payload.scheduled_generation_unused_template_months or 3), 1)
     row.scheduled_generation_used_template_cooldown_days = max(int(payload.scheduled_generation_used_template_cooldown_days or 30), 1)
     row.scheduled_generation_category_rules = payload.scheduled_generation_category_rules or {}
+    scope = normalize_schedule_scope(
+        scope_mode=payload.scheduled_generation_scope_mode,
+        account_ids=payload.scheduled_generation_scope_account_ids,
+        filters=payload.scheduled_generation_scope_filters,
+    )
+    row.scheduled_generation_scope_mode = scope["mode"]
+    row.scheduled_generation_scope_account_ids = scope["account_ids"]
+    row.scheduled_generation_scope_filters = scope["filters"]
     await session.commit()
     await session.refresh(row)
     return ScheduledGenerationConfigPayload(
@@ -269,6 +281,9 @@ async def put_scheduled_generation_config(
         scheduled_generation_unused_template_months=row.scheduled_generation_unused_template_months,
         scheduled_generation_used_template_cooldown_days=row.scheduled_generation_used_template_cooldown_days,
         scheduled_generation_category_rules=row.scheduled_generation_category_rules or {},
+        scheduled_generation_scope_mode=row.scheduled_generation_scope_mode or "filtered",
+        scheduled_generation_scope_account_ids=row.scheduled_generation_scope_account_ids or [],
+        scheduled_generation_scope_filters=row.scheduled_generation_scope_filters or {},
     )
 
 
@@ -392,6 +407,9 @@ async def get_template_supplement_config(
         template_supplement_target_unused_count=row.template_supplement_target_unused_count or 10,
         template_supplement_filters=row.template_supplement_filters or {},
         template_supplement_max_rounds=row.template_supplement_max_rounds or 2,
+        template_supplement_scope_mode=row.template_supplement_scope_mode or "filtered",
+        template_supplement_scope_account_ids=row.template_supplement_scope_account_ids or [],
+        template_supplement_scope_filters=row.template_supplement_scope_filters or {},
     )
 
 
@@ -407,6 +425,14 @@ async def put_template_supplement_config(
     row.template_supplement_target_unused_count = max(int(payload.template_supplement_target_unused_count or 10), 1)
     row.template_supplement_filters = payload.template_supplement_filters or {}
     row.template_supplement_max_rounds = max(int(payload.template_supplement_max_rounds or 2), 1)
+    scope = normalize_schedule_scope(
+        scope_mode=payload.template_supplement_scope_mode,
+        account_ids=payload.template_supplement_scope_account_ids,
+        filters=payload.template_supplement_scope_filters,
+    )
+    row.template_supplement_scope_mode = scope["mode"]
+    row.template_supplement_scope_account_ids = scope["account_ids"]
+    row.template_supplement_scope_filters = scope["filters"]
     await session.commit()
     await session.refresh(row)
     return TemplateSupplementConfigPayload(
@@ -415,4 +441,7 @@ async def put_template_supplement_config(
         template_supplement_target_unused_count=row.template_supplement_target_unused_count,
         template_supplement_filters=row.template_supplement_filters or {},
         template_supplement_max_rounds=row.template_supplement_max_rounds,
+        template_supplement_scope_mode=row.template_supplement_scope_mode or "filtered",
+        template_supplement_scope_account_ids=row.template_supplement_scope_account_ids or [],
+        template_supplement_scope_filters=row.template_supplement_scope_filters or {},
     )

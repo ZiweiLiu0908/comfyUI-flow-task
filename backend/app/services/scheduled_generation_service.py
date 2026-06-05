@@ -460,6 +460,7 @@ async def _step_one_republish(
     session: AsyncSession,
     *,
     owner_id: UUID,
+    account_ids: list[UUID],
     target_start_utc: datetime,
     target_end_utc: datetime,
     category_rules: dict,
@@ -482,6 +483,7 @@ async def _step_one_republish(
         .join(VideoClassification, VideoClassification.video_source_id == VideoAITemplate.video_source_id)
         .where(VideoTask.owner_id == owner_id)
         .where(VideoTask.account_id.is_not(None))
+        .where(VideoTask.account_id.in_(account_ids))
         .where(VideoPublication.status.in_(["completed", "partial"]))
         .where(VideoPublication.completed_at.is_not(None))
         .where(VideoPublication.completed_at >= target_start_utc)
@@ -564,14 +566,23 @@ async def execute_scheduled_generation_for_owner(
     unused_months = _as_positive_int(config.get("unused_template_months"), 3)
     cooldown_days = _as_positive_int(config.get("used_template_cooldown_days"), 30)
     category_rules = config.get("category_rules") or {}
+    scope_mode = config.get("scope_mode")
+    scope_account_ids = config.get("scope_account_ids") or []
+    scope_filters = config.get("scope_filters") or {}
     target_day, target_start_utc, target_end_utc = _target_day_utc_range(now_local, lookback_days)
     now_utc = _as_local_datetime(now_local).astimezone(timezone.utc)
+
+    from app.services.account_scope_service import normalize_schedule_scope
+    scope = normalize_schedule_scope(scope_mode=scope_mode, account_ids=scope_account_ids, filters=scope_filters)
 
     run = ScheduledGenerationRun(
         owner_id=owner_id,
         trigger_key=trigger_key,
         target_date=target_day,
         status="running",
+        scope_mode=scope["mode"],
+        scope_account_ids_snapshot=scope["account_ids"],
+        scope_filters_snapshot=scope["filters"],
         config_snapshot={
             "lookback_days": lookback_days,
             "target_unpublished_count": target_unpublished,
@@ -579,16 +590,28 @@ async def execute_scheduled_generation_for_owner(
             "unused_template_months": unused_months,
             "used_template_cooldown_days": cooldown_days,
             "category_rules": category_rules,
+            "scope": scope,
         },
     )
     session.add(run)
     await session.flush()
 
     try:
-        accounts = await _load_bound_accounts(session, owner_id)
+        from app.services.account_scope_service import resolve_schedule_scope_accounts
+
+        accounts = await resolve_schedule_scope_accounts(
+            session,
+            owner_id=owner_id,
+            scope_mode=scope["mode"],
+            account_ids=scope["account_ids"],
+            filters=scope["filters"],
+            require_channel_bound=True,
+        )
+        account_ids = [account.id for account in accounts]
         step_one_created, planned_by_account, step_one_template_ids_by_account = await _step_one_republish(
             session,
             owner_id=owner_id,
+            account_ids=account_ids,
             target_start_utc=target_start_utc,
             target_end_utc=target_end_utc,
             category_rules=category_rules,
@@ -691,6 +714,7 @@ async def execute_scheduled_generation_for_owner(
         total_created = step_one_created + unused_created + used_created
         run.status = "completed"
         run.account_count = len(accounts)
+        run.resolved_account_count = len(accounts)
         run.total_created_tasks = total_created
         run.step_one_created_tasks = step_one_created
         run.unused_template_created_tasks = unused_created

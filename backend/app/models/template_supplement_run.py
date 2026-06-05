@@ -32,6 +32,10 @@ class TemplateSupplementRun(Base):
     max_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     last_request_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True, index=True)
     filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    scope_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="filtered")
+    scope_account_ids_snapshot: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    scope_filters_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    resolved_account_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
