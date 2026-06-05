@@ -5,12 +5,12 @@ import logging
 import os
 import tempfile
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
 from google.cloud import storage
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.models.video_ai_template import VideoAITemplate
 from app.models.account import Account
 
+from app.models.template_usage_history import TemplateUsageHistory
 from app.models.video_task import VideoSubTask, VideoTask
 from app.models.video_task_config import VideoTaskConfig
 from app.services.ext_product_service import enrich_shots_with_ext_products
@@ -32,6 +33,8 @@ JOB = "jimeng/jobs"
 CLI_JOBS = "jimeng/cli-jobs"
 
 SUBTASK_COUNT = 3
+TEMPLATE_REUSE_REASON_HIGH_PERFORMANCE = "high_performance_reuse"
+TEMPLATE_REUSE_REASON_INVENTORY_FALLBACK = "inventory_fallback_reuse"
 
 
 def build_prompt_with_image_refs(base_prompt: str | None, shots_count: int, has_face: bool) -> str:
@@ -148,6 +151,9 @@ class VideoTaskService:
         user_id: uuid.UUID,
         target_date: date | None = None,
         subtask_count: int = SUBTASK_COUNT,
+        template_reuse_reason: str | None = None,
+        template_usage_source: str | None = "manual",
+        template_usage_source_step: str | None = None,
     ) -> VideoTask:
         if target_date is None:
             target_date = date.today() + timedelta(days=1)
@@ -170,6 +176,28 @@ class VideoTaskService:
 
         composed_prompt = build_prompt_with_image_refs(final_prompt, len(normalized_shots), has_face)
 
+        tpl = await self.db.scalar(
+            select(VideoAITemplate)
+            .where(VideoAITemplate.id == template_id)
+            .with_for_update()
+        )
+        was_already_used = bool(tpl and tpl.is_used)
+        effective_reuse_reason = template_reuse_reason
+        if was_already_used and not effective_reuse_reason:
+            effective_reuse_reason = TEMPLATE_REUSE_REASON_INVENTORY_FALLBACK
+
+        usage_index: int | None = None
+        used_at = None
+        if tpl:
+            max_history_index = await self.db.scalar(
+                select(func.max(TemplateUsageHistory.usage_index)).where(TemplateUsageHistory.template_id == template_id)
+            )
+            existing_task_count = await self.db.scalar(
+                select(func.count(VideoTask.id)).where(VideoTask.template_id == template_id)
+            )
+            usage_index = max(int(max_history_index or 0), int(existing_task_count or 0)) + 1
+            used_at = datetime.now(timezone.utc)
+
         task = VideoTask(
             owner_id=user_id,
             account_id=account_id,
@@ -181,12 +209,30 @@ class VideoTaskService:
             shots=normalized_shots,
             has_face=has_face,
             cta=cta,
+            is_reused_template=bool(effective_reuse_reason),
+            template_reuse_reason=effective_reuse_reason,
+            template_usage_index=usage_index,
+            template_used_at=used_at,
+            template_usage_source=template_usage_source,
+            template_usage_source_step=template_usage_source_step,
         )
         self.db.add(task)
         await self.db.flush()  # get task.id before creating sub-tasks
 
+        if tpl and usage_index is not None and used_at is not None:
+            self.db.add(TemplateUsageHistory(
+                owner_id=user_id,
+                account_id=account_id,
+                template_id=template_id,
+                video_task_id=task.id,
+                usage_index=usage_index,
+                used_at=used_at,
+                reuse_reason=effective_reuse_reason,
+                source=template_usage_source,
+                source_step=template_usage_source_step,
+            ))
+
         # 标记模板为已使用
-        tpl = await self.db.get(VideoAITemplate, template_id)
         if tpl and not tpl.is_used:
             tpl.is_used = True
 

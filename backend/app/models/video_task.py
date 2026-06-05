@@ -32,6 +32,13 @@ class VideoTask(Base):
     cta: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # AI 模板成功写回 shots 后标记为 True，一键重试时跳过已处理完成的任务
     ai_retry_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 模板复用审计：所有使用已使用模板创建的总任务都会打标，原因用于队列优先级和排查。
+    is_reused_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    template_reuse_reason: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    template_usage_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    template_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    template_usage_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    template_usage_source_step: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

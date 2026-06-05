@@ -48,6 +48,12 @@ class VideoTaskRead(BaseModel):
     shots: list | None = None
     has_face: bool = True
     cta: bool = False  # 创建任务时按 account.product_code_mode 推算（with_code → True）
+    is_reused_template: bool = False
+    template_reuse_reason: str | None = None
+    template_usage_index: int | None = None
+    template_used_at: datetime | None = None
+    template_usage_source: str | None = None
+    template_usage_source_step: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -86,6 +92,10 @@ class TaskSummaryForSub(BaseModel):
     target_date: date
     prompt: str
     template_title: str | None = None
+    is_reused_template: bool = False
+    template_reuse_reason: str | None = None
+    template_usage_index: int | None = None
+    template_used_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

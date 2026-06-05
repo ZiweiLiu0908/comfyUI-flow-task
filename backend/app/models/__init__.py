@@ -25,6 +25,7 @@ from app.models.external_supplement_request import ExternalSupplementRequest
 from app.models.external_supplement_request_item import ExternalSupplementRequestItem
 from app.models.template_supplement_run import TemplateSupplementRun
 from app.models.scheduled_generation_run import ScheduledGenerationRun, ScheduledGenerationRunItem
+from app.models.template_usage_history import TemplateUsageHistory
 
 __all__ = [
     "VideoSource", "VideoSourceStat", "VideoAITemplate", "Account",
@@ -46,4 +47,5 @@ __all__ = [
     "ExternalSupplementRequestItem",
     "TemplateSupplementRun",
     "ScheduledGenerationRun", "ScheduledGenerationRunItem",
+    "TemplateUsageHistory",
 ]

@@ -5,7 +5,7 @@ Account publish scheduler
 1. 用 croniter 按北京时间判断上一个触发点是否在本轮 poll 窗口内
 2. 用数据库字段 publish_last_triggered_at 去重（防止重启重复触发）
 3. 若命中：随机延迟 0~publish_window_minutes 分钟后执行
-4. 执行时从该账号的 queued 队列按 queue_order 取前 publish_count 个子任务，并发发布
+4. 执行时从该账号 queued 队列优先取爆款复用任务，再按 queue_order 取前 publish_count 个子任务，并发发布
 5. 多账号之间并发处理（asyncio.gather）
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytz
 from croniter import croniter
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import SessionLocal
@@ -233,7 +233,11 @@ async def _do_publish(account: Account) -> None:
                 VideoSubTask.result_video_url.isnot(None),
                 VideoSubTask.publish_meta["status"].as_string() == "done",
             )
-            .order_by(VideoSubTask.queue_order.asc().nullslast())
+            .order_by(
+                case((VideoTask.template_reuse_reason == "high_performance_reuse", 0), else_=1),
+                VideoSubTask.queue_order.asc().nullslast(),
+                VideoSubTask.created_at.asc(),
+            )
             .limit(publish_count)
             .options(selectinload(VideoSubTask.task))
         )

@@ -187,7 +187,7 @@
       <!-- Queue tab hint -->
       <div v-if="activeTab === 'queued'" class="ad-queue-hint">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        拖拽视频卡片可调整发布顺序，队列按得分从高到低排列
+        爆款复用任务优先发布，其余可拖拽调整顺序
       </div>
 
       <!-- Video grid -->
@@ -209,7 +209,7 @@
           v-for="(item, index) in filteredSubTasks"
           :key="item.sub.id"
           class="ad-video-card"
-          :class="{ 'ad-card-selected': item.sub.selected, 'ad-card-dragging': draggingId === item.sub.id }"
+          :class="{ 'ad-card-selected': item.sub.selected, 'ad-card-dragging': draggingId === item.sub.id, 'ad-card-hot-reuse': item.task.template_reuse_reason === 'high_performance_reuse' }"
           :draggable="activeTab === 'queued'"
           @dragstart="onDragStart($event, item.sub.id, index)"
           @dragend="onDragEnd"
@@ -261,6 +261,18 @@
               <span class="ad-card-index">#{{ item.sub.sub_index }}</span>
             </div>
             <div class="ad-card-template">{{ item.task.template_title || '未知模板' }}</div>
+            <div v-if="item.task.is_reused_template" class="ad-card-reuse-row">
+              <span class="ad-reuse-badge" :class="reuseReasonClass(item.task.template_reuse_reason)">
+                {{ reuseReasonLabel(item.task.template_reuse_reason) }}
+              </span>
+              <span
+                v-if="item.task.template_usage_index"
+                class="ad-reuse-count"
+                :title="item.task.template_used_at ? `使用日期：${fmtDate(item.task.template_used_at)}` : ''"
+              >
+                第 {{ item.task.template_usage_index }} 次使用
+              </span>
+            </div>
             <div class="ad-card-prompt">{{ item.task.prompt }}</div>
 
             <!-- AI Scoring details -->
@@ -809,6 +821,11 @@ const EMPTY_TEXTS = {
   published:       '暂无已发布的视频',
 }
 
+const TEMPLATE_REUSE_LABELS = {
+  high_performance_reuse: '爆款复用',
+  inventory_fallback_reuse: '库存补位',
+}
+
 const loading = ref(false)
 const account = ref(null)
 const tabSubTasks = ref([])   // current tab's sub_tasks (with task info)
@@ -876,6 +893,10 @@ function fmtDate(iso) {
 }
 
 function platformLabel(p) { return PLATFORM_LABELS[p] || p }
+function reuseReasonLabel(reason) { return TEMPLATE_REUSE_LABELS[reason] || '模板复用' }
+function reuseReasonClass(reason) {
+  return reason === 'high_performance_reuse' ? 'ad-reuse-hot' : 'ad-reuse-fallback'
+}
 const boundChannelBindings = computed(() =>
   (account.value?.channel_reservations || [])
     .filter(item => item.status === 'bound')
@@ -1954,6 +1975,7 @@ onUnmounted(() => {
 .ad-video-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.07); }
 .ad-video-card.ad-card-selected { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); }
 .ad-video-card.ad-card-dragging { opacity: 0.5; border: 2px dashed #6366f1; }
+.ad-video-card.ad-card-hot-reuse { border-color: #f59e0b; box-shadow: 0 0 0 1px rgba(245,158,11,0.18); }
 .ad-grid-draggable .ad-video-card { cursor: grab; }
 .ad-grid-draggable .ad-video-card:active { cursor: grabbing; }
 
@@ -2042,6 +2064,26 @@ onUnmounted(() => {
   font-size: 12px; font-weight: 600; color: #6366f1;
   margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+.ad-card-reuse-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 0 0 6px;
+}
+
+.ad-reuse-badge {
+  font-size: 10px; font-weight: 800;
+  padding: 2px 6px; border-radius: 5px;
+}
+
+.ad-reuse-hot {
+  background: #fef3c7; color: #b45309; border: 1px solid #fcd34d;
+}
+
+.ad-reuse-fallback {
+  background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;
+}
+
+.ad-reuse-count { font-size: 10px; color: #64748b; font-weight: 700; }
 
 .ad-card-prompt {
   font-size: 12px; color: #475569; line-height: 1.4;

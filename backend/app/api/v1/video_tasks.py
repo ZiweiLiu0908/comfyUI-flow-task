@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import TokenData, get_current_user, get_optional_user
@@ -333,7 +333,11 @@ async def list_subtasks_by_account(
     # queued 按 queue_order 排序；published 按 video_publication.completed_at 倒序；
     # pending_publish 按权重分；其他按创建时间倒序
     if status == "queued":
-        base = base.order_by(VideoSubTask.queue_order.asc().nulls_last())
+        base = base.order_by(
+            case((VideoTask.template_reuse_reason == "high_performance_reuse", 0), else_=1),
+            VideoSubTask.queue_order.asc().nulls_last(),
+            VideoSubTask.created_at.asc(),
+        )
     elif status == "pending_publish":
         base = base.order_by(VideoSubTask.weighted_total_score.desc().nulls_last())
     elif status == "published":
@@ -379,6 +383,10 @@ async def list_subtasks_by_account(
             target_date=task.target_date,
             prompt=task.prompt,
             template_title=getattr(task, "_template_title", None),
+            is_reused_template=task.is_reused_template,
+            template_reuse_reason=task.template_reuse_reason,
+            template_usage_index=task.template_usage_index,
+            template_used_at=task.template_used_at,
         ) if task else None
         if task_summary is None:
             continue

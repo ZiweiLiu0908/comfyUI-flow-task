@@ -241,6 +241,8 @@ async def _create_task_from_template(
     template: Any,
     video_source: Any | None,
     subtask_count: int,
+    template_reuse_reason: str | None = None,
+    template_usage_source_step: str | None = None,
 ) -> UUID:
     from app.services.video_task_service import VideoTaskService
 
@@ -253,6 +255,9 @@ async def _create_task_from_template(
         shots=_template_shots(template),
         user_id=owner_id,
         subtask_count=max(int(subtask_count or 1), 1),
+        template_reuse_reason=template_reuse_reason,
+        template_usage_source="scheduled",
+        template_usage_source_step=template_usage_source_step,
     )
     return task.id
 
@@ -514,6 +519,8 @@ async def _step_one_republish(
                 template=template,
                 video_source=vs_map.get(template.video_source_id),
                 subtask_count=subtask_count,
+                template_reuse_reason="high_performance_reuse",
+                template_usage_source_step="high_performance_republish",
             )
             created_task_ids.append(str(task_id))
             created_tasks += 1
@@ -619,6 +626,7 @@ async def execute_scheduled_generation_for_owner(
                     template=template,
                     video_source=source,
                     subtask_count=subtask_count,
+                    template_usage_source_step="unused_template_top_up",
                 )
                 session.add(ScheduledGenerationRunItem(
                     run_id=run.id,
@@ -651,6 +659,8 @@ async def execute_scheduled_generation_for_owner(
                     template=template,
                     video_source=source,
                     subtask_count=subtask_count,
+                    template_reuse_reason="inventory_fallback_reuse",
+                    template_usage_source_step="used_template_top_up",
                 )
                 session.add(ScheduledGenerationRunItem(
                     run_id=run.id,
